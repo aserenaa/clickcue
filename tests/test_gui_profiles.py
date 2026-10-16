@@ -185,7 +185,7 @@ def test_import_external_name_opens_unsaved_copy_and_save_confirms_collision(
 
 
 @pytest.mark.parametrize("payload,discard", [
-    ('{"name":"Bad","schema_version":2}', True),
+    ('{"name":"Bad","schema_version":3}', True),
     ('{"name":"Bad","steps":[{"name":"Valid","x":0,"y":0,"delay":0},null]}', True),
     ('{"name":"Valid"}', False),
 ])
@@ -210,7 +210,7 @@ def test_import_rejection_preserves_editor(transfer_editor, tmp_path, monkeypatc
     if discard:
         confirm.assert_not_called()  # Validation precedes any discard prompt.
         assert error.call_count == 1
-        assert ("unsupported version 2" if "schema_version" in payload
+        assert ("unsupported version 3" if "schema_version" in payload
                 else "steps[2]") in error.call_args.args[1]
     else:
         error.assert_not_called()
@@ -243,7 +243,7 @@ def test_export_editor_snapshot_without_saving(transfer_editor, tmp_path, monkey
         assert external.read_bytes() == b"previous file"
     else:
         payload = json.loads(external.read_text(encoding="utf-8"))
-        assert payload["schema_version"] == 1
+        assert payload["schema_version"] == 2
         assert Profile.from_dict(payload) == Profile(
             "Original" if saved else "Unsaved sequence",
             [Step("Edited", 10, 20, 0.5)], False, 7,

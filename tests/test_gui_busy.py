@@ -170,7 +170,7 @@ def test_dialog_completion_cannot_mutate_after_start(editor, monkeypatch, tmp_pa
         app._toggle_playback()
         return result
 
-    monkeypatch.setattr("clickcue.gui.StepDialog", lambda *args: start(Mock(result=Step("Changed", 4, 5, 0))))
+    monkeypatch.setattr("clickcue.gui.StepDialog", lambda *args, **kwargs: start(Mock(result=Step("Changed", 4, 5, 0))))
     monkeypatch.setattr("clickcue.gui.WindowPickerDialog", lambda *args: start(Mock(result=TargetWindow("Changed"))))
     monkeypatch.setattr("clickcue.gui.simpledialog.askstring", lambda *a, **k: start("Changed"))
     monkeypatch.setattr("clickcue.gui.messagebox.askyesno", lambda *a, **k: start(True))
