@@ -183,6 +183,8 @@ that do not conflict with shortcuts in your target app or operating system.
    cancelling prevents playback even if an OS window call finishes later.
    OS window calls cannot be interrupted, so another Start becomes available
    once the pending call returns. Changes in the editor apply to the next run.
+   Closing cancels preparation even if you keep editing at the unsaved-changes
+   prompt; use Start again when ready.
    If the saved target is unavailable, click playback stays stopped: open the
    target app, reselect it with *Target window → Choose…*, or use *Clear* to
    explicitly play with saved absolute coordinates. This leaves your steps

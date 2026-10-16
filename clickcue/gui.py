@@ -148,6 +148,7 @@ class ClickCueApp:
         self.player: Player | None = None
         self._preparation: PlaybackPreparation | None = None
         self._closed = False
+        self._closing = False
         self.capture_armed = False
         self.current_profile: str | None = None
         self.imported_profile_name: str | None = None
@@ -391,6 +392,8 @@ class ClickCueApp:
         kind = event[0]
         if kind == "prepared":
             self._finish_preparation(event[1])
+        elif kind == "close_cancelled":
+            self._closing = False
         elif kind == "preparation_stopped":
             _, preparation, status = event
             if self._closed or preparation is not self._preparation:
@@ -490,6 +493,8 @@ class ClickCueApp:
             return
         if self.player is not None:
             self.player.stop()
+            return
+        if self._closing:
             return
         if not self.steps:
             messagebox.showinfo("No steps",
@@ -914,12 +919,19 @@ class ClickCueApp:
     # ------------------------------------------------------------------ close
 
     def _on_close(self) -> None:
+        if self._closed or self._closing:
+            return
+        self._closing = True
         # Confirmation runs a nested Tk loop that can deliver worker completion.
         if self._preparation is not None:
             self._preparation.windows.cancelled.set()
         if self.dirty and not self._confirm_discard():
+            # Consume modal hotkeys before allowing a new Start, including a
+            # toggle queued immediately before the confirmation was dismissed.
+            self.events.put(("close_cancelled",))
             return
         self._closed = True
+        self._closing = False
         if self._preparation is not None:
             self._preparation.windows.cancelled.set()
             self._preparation = None

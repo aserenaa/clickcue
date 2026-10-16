@@ -23,6 +23,7 @@ def app(monkeypatch):
     app.player = None
     app._preparation = None
     app._closed = False
+    app._closing = False
     app.steps = [Step("Click", 17, 29, 0)]
     app.target_window = TargetWindow("Target")
     app.loop_forever = Mock()
@@ -178,12 +179,21 @@ def test_blocked_preparation_keeps_ui_responsive_and_discards_cancelled_results(
         release.set()
 
 
-@pytest.fixture
-def tk_root(app):
+@pytest.fixture(scope="module")
+def tk_runtime():
     try:
         root = tk.Tk()
     except tk.TclError as exc:
         pytest.skip(f"Tk unavailable: {exc}")
+    root.withdraw()
+    yield root
+    root.destroy()
+
+
+@pytest.fixture
+def tk_root(app, tk_runtime):
+    # Keep one Tcl/Tk interpreter; close each app window independently.
+    root = tk.Toplevel(tk_runtime)
     root.withdraw()
     app.root = root
     yield root
@@ -242,13 +252,30 @@ def test_dirty_close_cancels_preparation_before_confirmation(
     player = Mock()
     monkeypatch.setattr("clickcue.gui.Player", player)
     closed_during_confirmation = []
+    cleanup_seen = []
 
     def confirm(*args):
         dialog = tk.Toplevel(tk_root)
         dialog.grab_set()
+
+        def dismiss():
+            # Also cover a toggle queued too late for the modal's final poll.
+            app.events.put(("hotkey_toggle",))
+            dialog.destroy()
+
+        def after_cleanup():
+            if app._preparation is not None:
+                tk_root.after(EVENT_POLL_MS, after_cleanup)
+                return
+            cleanup_seen.append(True)
+            app.events.put(("hotkey_toggle",))
+            tk_root.after(500, dismiss)
+
         tk_root.after(0, release.set)
-        tk_root.after(600, dialog.destroy)
+        tk_root.after(EVENT_POLL_MS, after_cleanup)
+        deadline = tk_root.after(2000, dialog.destroy)
         tk_root.wait_window(dialog)
+        tk_root.after_cancel(deadline)
         closed_during_confirmation.append(app._closed)
         return accept_close
 
@@ -259,10 +286,15 @@ def test_dirty_close_cancels_preparation_before_confirmation(
         assert entered.wait(1)
         app._poll_events()
         app._on_close()  # the real dirty check and confirmation handler
+        assert cleanup_seen == [True]
         assert closed_during_confirmation == [False]
         player.assert_not_called()
         assert app._closed is accept_close
         if not accept_close:
+            tk_root.after(500, tk_root.quit)
+            tk_root.mainloop()
+            player.assert_not_called()  # queued modal toggles must not become Start
+            assert not app._closing
             assert app.dirty
             assert app._preparation is None
             app.start_button.configure.assert_called_with(
