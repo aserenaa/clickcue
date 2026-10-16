@@ -152,7 +152,10 @@ need their own.
    the last selected step, keeping their names, coordinates, and delays. Use
    Shift-click to select a range, or Command-click (macOS) / Ctrl-click
    (Windows/Linux) to select separate steps. The new copies stay selected.
-4. Choose *Loop forever* or a repeat count.
+4. Choose *Loop forever* or a repeat count. Infinite playback requires at least
+   one click or a positive delay; a sequence of only zero-delay waits is rejected.
+   During fast playback, the status shows the latest progress update so controls
+   and hotkeys stay responsive.
 5. Press *▶ Start* or hit **F6**. ClickCue focuses the target window, restores
    its recorded position/size if it moved, then plays the sequence. **F6**
    stops playback, cancelling a pending click after the guard returns or during

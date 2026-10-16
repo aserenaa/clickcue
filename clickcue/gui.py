@@ -9,6 +9,7 @@ from tkinter import messagebox, simpledialog, ttk
 
 from pynput import keyboard, mouse
 
+from .events import EventQueue
 from .models import Step, TargetWindow
 from .platform_support import (accessibility_trusted, find_window,
                                focus_window, focus_window_at, list_windows,
@@ -20,6 +21,7 @@ APP_NAME = "ClickCue"
 TOGGLE_KEY = keyboard.Key.f6
 CAPTURE_KEY = keyboard.Key.f8
 EVENT_POLL_MS = 80
+MAX_EVENTS_PER_POLL = 100
 
 
 class StepDialog(tk.Toplevel):
@@ -151,7 +153,7 @@ class ClickCueApp:
         self._loading = False
         self._playing_anchor: TargetWindow | None = None
         self._blocked_status: str | None = None
-        self.events: queue.Queue = queue.Queue()
+        self.events: queue.Queue = EventQueue()
 
         self.loop_forever = tk.BooleanVar(value=True)
         self.repetitions = tk.StringVar(value="10")
@@ -299,7 +301,7 @@ class ClickCueApp:
 
     def _poll_events(self) -> None:
         try:
-            while True:
+            for _ in range(MAX_EVENTS_PER_POLL):
                 self._handle_event(self.events.get_nowait())
         except queue.Empty:
             pass

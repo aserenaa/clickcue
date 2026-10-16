@@ -38,6 +38,9 @@ class Player(threading.Thread):
     def run(self) -> None:
         repetition = 0
         try:
+            if self.loop_forever and all(
+                    step.wait_only and step.delay <= 0 for step in self.steps):
+                raise ValueError("Loop forever requires a click or a positive delay")
             self._stop_event.wait(FOCUS_GRACE_SECONDS)
             while not self._stop_event.is_set():
                 repetition += 1
