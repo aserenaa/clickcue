@@ -1,12 +1,16 @@
 import queue
 import threading
 import time
+from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import Mock, PropertyMock
 
 import pytest
 
+from clickcue import platform_support as platform
 from clickcue.models import Step, TargetWindow
 from clickcue.playback import Player
+from clickcue.preparation import WindowPlayback
 
 
 @pytest.fixture(autouse=True)
@@ -251,17 +255,20 @@ def test_condition_wait_only_continues_when_available(controller, monkeypatch, o
         player.join(timeout=2)
 
 
-@pytest.mark.parametrize("boundary", ["probe", "preparation"])
+@pytest.mark.parametrize("boundary,late_error", [
+    (boundary, late_error) for boundary in ("probe", "preparation")
+    for late_error in (False, True)
+] + [("focus", False), ("restore", False), ("focus_query", False)])
 @pytest.mark.parametrize("finish", ["resume", "stop"])
-@pytest.mark.parametrize("late_error", [False, True])
 def test_condition_native_results_are_invalidated_by_controls(
         controller, monkeypatch, boundary, finish, late_error):
     monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
     entered = threading.Event()
     release = threading.Event()
     retried = threading.Event()
-    target = TargetWindow("Example", native_id=1, pid=10)
+    target = TargetWindow("Example", 10, 20, 100, 100, native_id=1, pid=10)
     calls = []
+    ordering = []
     original = [Step("Available", 0, 0, 0, True, "target_window_ready", 0.4),
                 Step("Click", 10, 20, 0)]
 
@@ -280,21 +287,71 @@ def test_condition_native_results_are_invalidated_by_controls(
             native()
         return target
 
-    def prepare(identity, cancelled):
+    def prepare(identity, cancelled, admit=None):
         assert identity.same_window(target)
         native()
         return [original[0], Step("Click", 999 if len(calls) == 1 else 10, 20, 0)]
 
+    if boundary in ("focus", "restore", "focus_query"):
+        def suspend():
+            entered.set()
+            assert release.wait(2)
+
+        class PreparationBoundary(WindowPlayback):
+            def _check_cancelled(self):
+                super()._check_cancelled()
+                # The target is assigned immediately before the final focus
+                # cancellation check. Suspend after that check has succeeded.
+                if boundary == "focus" and self.target is not None and not entered.is_set():
+                    suspend()
+
+        def restoring(*args, **kwargs):
+            # Argument construction follows the last restoration check and
+            # precedes native initiation; no operation is in flight here.
+            if not entered.is_set():
+                suspend()
+            return replace(*args, **kwargs)
+
+        def action(name):
+            ordering.append(name)
+            if entered.is_set():
+                retried.set()
+            return False
+
+        def queried(_):
+            if boundary == "focus_query" and not entered.is_set():
+                suspend()
+            return target
+
+        monkeypatch.setattr("clickcue.preparation.find_window", lambda _: target)
+        monkeypatch.setattr("clickcue.preparation.window_info_at", lambda *a, **kw: target)
+        monkeypatch.setattr(platform, "sys", SimpleNamespace(platform="win32"))
+        monkeypatch.setattr(platform, "find_window", queried)
+        monkeypatch.setattr(platform, "_windows_set_foreground", lambda _: action("focus"))
+        user32 = SimpleNamespace(SetThreadDpiAwarenessContext=lambda _: -3,
+                                 MoveWindow=lambda *args: action("restore"))
+        monkeypatch.setattr(platform, "_windows_user32", lambda: (None, user32))
+        if boundary == "restore":
+            monkeypatch.setattr("clickcue.preparation.replace", restoring)
+        windows = PreparationBoundary(TargetWindow("Example", 0, 0, 100, 100))
+
+        def prepare(identity, cancelled, admit=None):
+            if admit is None:
+                return windows.prepare_deferred(original, identity, cancelled)
+            return windows.prepare_deferred(original, identity, cancelled, admit)
+
     player = Player(original, False, 1, queue.Queue(), target_probe=probe,
-                    prepare_clicks=prepare if boundary == "preparation" else None)
+                    prepare_clicks=prepare if boundary != "probe" else None)
     player.start()
     try:
         assert entered.wait(2)
-        if finish == "stop":
-            player.stop()
-        else:
-            player.pause()
+        player.request_control("stop" if finish == "stop" else "pause")
+        while player.events.get(timeout=2)[0] != "controlled":
+            pass
+        ordering.append("acknowledged")
         release.set()
+        if boundary in ("focus", "restore", "focus_query"):
+            assert not retried.wait(0.15), ordering
         if finish == "resume":
             # Paused time exceeds the full condition timeout; no result may
             # authorize later input, and Resume must perform fresh native work.
@@ -306,7 +363,8 @@ def test_condition_native_results_are_invalidated_by_controls(
         assert not player.is_alive()
         assert controller.press.call_count == (finish == "resume")
         if finish == "resume":
-            assert controller.position == (10, 20)
+            expected = (20, 40) if boundary in ("focus", "restore", "focus_query") else (10, 20)
+            assert controller.position == expected
         assert not any(event[0] == "error" for event in player.events.queue)
     finally:
         release.set()

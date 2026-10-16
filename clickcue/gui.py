@@ -784,8 +784,8 @@ class ClickCueApp:
         self.player = Player(prepared.steps, preparation.loop_forever,
                              preparation.repetitions, self.events,
                              guard=windows.guard, target_probe=windows.probe_target,
-                             prepare_clicks=(lambda identity, cancelled: windows.prepare_deferred(
-                                 prepared.steps, identity, cancelled)) if preparation.deferred else None)
+                             prepare_clicks=(lambda identity, cancelled, admit: windows.prepare_deferred(
+                                 prepared.steps, identity, cancelled, admit)) if preparation.deferred else None)
         self._update_editing_controls()
         self.player.start()
         self.start_button.configure(text=f"■ Stop ({self.hotkeys.toggle})")

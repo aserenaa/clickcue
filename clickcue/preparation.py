@@ -7,6 +7,7 @@ from threading import Event, Thread
 
 from .models import Step, TargetWindow
 from .platform_support import (
+    WindowAction,
     find_window,
     focus_window,
     focus_window_at,
@@ -49,15 +50,16 @@ class WindowPlayback:
         return current
 
     def prepare_deferred(self, steps: list[Step], identity: TargetWindow | None,
-                         cancelled: Event) -> list[Step]:
+                         cancelled: Event, admit: WindowAction) -> list[Step]:
         self.cancelled = cancelled
-        result = self.prepare(steps, identity=identity)
+        result = self.prepare(steps, identity=identity, native_action=admit)
         if result.missing_target:
             raise ValueError(result.status)
         return result.steps
 
     def prepare(self, steps: list[Step], *,
-                identity: TargetWindow | None = None) -> PreparationResult:
+                identity: TargetWindow | None = None,
+                native_action: WindowAction | None = None) -> PreparationResult:
         """Focus the target, restore its bounds if possible, and return the
         steps to play — coordinate-adjusted when the window cannot be moved
         back to where the profile was recorded."""
@@ -84,15 +86,20 @@ class WindowPlayback:
 
         self.target = current
         self._check_cancelled()
-        focus_window(current)
+        if native_action is None:
+            focus_window(current)
+        else:
+            focus_window(current, admit=native_action)
         self._check_cancelled()
         if not anchor.has_bounds or current.same_bounds(anchor):
             return self._verified(list(steps),
                                   f"Playing on “{anchor.app}”…")
 
         self._check_cancelled()
-        moved = move_window(replace(current, x=anchor.x, y=anchor.y,
-                                    width=anchor.width, height=anchor.height))
+        restored_bounds = replace(current, x=anchor.x, y=anchor.y,
+                                  width=anchor.width, height=anchor.height)
+        moved = (move_window(restored_bounds) if native_action is None else
+                 move_window(restored_bounds, admit=native_action))
         self._check_cancelled()
         if moved:
             restored = find_window(current)

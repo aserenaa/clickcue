@@ -14,6 +14,7 @@ from typing import Callable, Literal
 from pynput import mouse
 
 from .models import Step, TargetWindow
+from .platform_support import WindowAction
 
 FOCUS_GRACE_SECONDS = 0.3
 PRESS_HOLD_SECONDS = 0.02
@@ -23,7 +24,7 @@ PRESS_HOLD_SECONDS = 0.02
 # retry waits. Player discards cancelled results and rechecks after Resume.
 ClickGuard = Callable[[Step, threading.Event], str | None]
 TargetProbe = Callable[[TargetWindow | None], TargetWindow | None]
-PrepareClicks = Callable[[TargetWindow | None, threading.Event], list[Step]]
+PrepareClicks = Callable[[TargetWindow | None, threading.Event, WindowAction], list[Step]]
 
 
 class Player(threading.Thread):
@@ -192,8 +193,20 @@ class Player(threading.Thread):
                     continue
                 generation = self._pause_generation
                 self._guard_cancelled = threading.Event()
+                cancelled = self._guard_cancelled
+
+            def admit(action: Callable[[], bool], *, generation: int = generation,
+                      cancelled: threading.Event = cancelled) -> bool:
+                # Observation and settle waits stay outside this lock. Only
+                # final validation and synchronous native initiation share it.
+                with self._condition:
+                    if (cancelled.is_set() or self._stop_event.is_set()
+                            or self._paused_at is not None or generation != self._pause_generation):
+                        raise InterruptedError("Preparation cancelled")
+                    return action()
+
             try:
-                steps = prepare(self._target, self._guard_cancelled)
+                steps = prepare(self._target, cancelled, admit)
             except Exception:
                 with self._condition:
                     if self._stop_event.is_set():

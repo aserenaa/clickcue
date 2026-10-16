@@ -10,10 +10,18 @@ resolves a live native window identity; native IDs are never persisted.
 
 import os
 import sys
+from typing import Callable
 
 from .models import TargetWindow
 
 MIN_WINDOW_SIZE = 60  # picker only; coverage includes palettes and tooltips
+
+# Deferred preparation supplies Player's control-serialized native admission.
+WindowAction = Callable[[Callable[[], bool]], bool]
+
+
+def _perform_window_action(action: Callable[[], bool], admit: WindowAction | None) -> bool:
+    return action() if admit is None else admit(action)
 
 
 def accessibility_trusted(prompt: bool = False) -> bool:
@@ -72,16 +80,19 @@ def window_info_at(x: int, y: int,
     return None
 
 
-def focus_window(window: TargetWindow) -> bool:
+def focus_window(window: TargetWindow, *, admit: WindowAction | None = None) -> bool:
     """Raise the selected native window when the OS permits it."""
     if sys.platform == "darwin":
-        return _macos_focus_window(window)
+        return _macos_focus_window(window, admit=admit)
     if sys.platform == "win32":
         current = find_window(window)
         hwnd = current.native_id if current else None
         if hwnd:
-            _windows_set_foreground(hwnd)
-            return True
+            def focus() -> bool:
+                _windows_set_foreground(hwnd)
+                return True
+
+            return _perform_window_action(focus, admit)
         return False
     return False
 
@@ -98,14 +109,14 @@ def focus_window_at(x: int, y: int) -> str | None:
     return window.app if window else None
 
 
-def move_window(window: TargetWindow) -> bool:
+def move_window(window: TargetWindow, *, admit: WindowAction | None = None) -> bool:
     """Move and resize the selected native window to the stored bounds."""
     if not window.has_bounds:
         return False
     if sys.platform == "darwin":
-        return _macos_move_window(window)
+        return _macos_move_window(window, admit=admit)
     if sys.platform == "win32":
-        return _windows_move_window(window)
+        return _windows_move_window(window, admit=admit)
     return False
 
 
@@ -181,33 +192,38 @@ def _macos_ax_window(window: TargetWindow):
     return matches[0] if len(matches) == 1 else None
 
 
-def _macos_focus_window(window: TargetWindow) -> bool:
+def _macos_focus_window(window: TargetWindow, *, admit: WindowAction | None = None) -> bool:
     try:
         from ApplicationServices import AXUIElementPerformAction
         selected = _macos_ax_window(window)
         if selected is None:
             return False
-        activated = _macos_activate_pid(window.pid)
-        raised = AXUIElementPerformAction(selected, "AXRaise") == 0
+        activated = (_macos_activate_pid(window.pid) if admit is None else
+                     _macos_activate_pid(window.pid, admit=admit))
+        raised = _perform_window_action(lambda: AXUIElementPerformAction(selected, "AXRaise") == 0,
+                                        admit)
         return activated and raised
     except Exception:
         return False
 
 
-def _macos_activate_pid(pid: int) -> bool:
+def _macos_activate_pid(pid: int, *, admit: WindowAction | None = None) -> bool:
     try:
         from AppKit import (NSApplicationActivateIgnoringOtherApps,
                             NSRunningApplication)
         running = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
         if running is None:
             return False
-        running.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
-        return True
+        def activate() -> bool:
+            running.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+            return True
+
+        return _perform_window_action(activate, admit)
     except Exception:
         return False
 
 
-def _macos_move_window(window: TargetWindow) -> bool:
+def _macos_move_window(window: TargetWindow, *, admit: WindowAction | None = None) -> bool:
     try:
         import Quartz
         from ApplicationServices import (AXUIElementSetAttributeValue,
@@ -220,9 +236,11 @@ def _macos_move_window(window: TargetWindow) -> bool:
                                  Quartz.CGPoint(window.x, window.y))
         size = AXValueCreate(kAXValueCGSizeType,
                              Quartz.CGSize(window.width, window.height))
-        moved = AXUIElementSetAttributeValue(selected, "AXPosition", position)
-        sized = AXUIElementSetAttributeValue(selected, "AXSize", size)
-        return moved == 0 and sized == 0
+        moved = _perform_window_action(
+            lambda: AXUIElementSetAttributeValue(selected, "AXPosition", position) == 0, admit)
+        sized = _perform_window_action(
+            lambda: AXUIElementSetAttributeValue(selected, "AXSize", size) == 0, admit)
+        return moved and sized
     except Exception:
         return False
 
@@ -360,19 +378,22 @@ def _windows_set_foreground(hwnd) -> None:
         pass
 
 
-def _windows_move_window(window: TargetWindow) -> bool:
+def _windows_move_window(window: TargetWindow, *, admit: WindowAction | None = None) -> bool:
     try:
         _ctypes, user32 = _windows_user32()
         current = find_window(window)
         if current is None:
             return False
-        previous = user32.SetThreadDpiAwarenessContext(-3)
-        if not previous:
-            return False
-        try:
-            return bool(user32.MoveWindow(current.native_id, window.x, window.y,
-                                          window.width, window.height, True))
-        finally:
-            user32.SetThreadDpiAwarenessContext(previous)
+        def move() -> bool:
+            previous = user32.SetThreadDpiAwarenessContext(-3)
+            if not previous:
+                return False
+            try:
+                return bool(user32.MoveWindow(current.native_id, window.x, window.y,
+                                              window.width, window.height, True))
+            finally:
+                user32.SetThreadDpiAwarenessContext(previous)
+
+        return _perform_window_action(move, admit)
     except Exception:
         return False
