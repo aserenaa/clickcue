@@ -2,7 +2,7 @@
 
 The player emits ("waiting", repetition, step_index, step_name, remaining),
 ("playing", repetition, step_index, step_name),
-("blocked", step_name, covering_app), ("error", message) and ("stopped",)
+("blocked", step_name, covering_app, x, y), ("error", message) and ("stopped",)
 tuples on the given queue; the GUI consumes them from the Tk main loop.
 """
 
@@ -67,11 +67,14 @@ class Player(threading.Thread):
             if self._stop_event.is_set():
                 return
             self.events.put(("playing", repetition, index, step.name))
+            if step.wait_only:
+                continue
             if self.guard is not None:
                 covering = self.guard(step)
                 if covering is not None:
                     # Never click outside the target window; stop instead.
-                    self.events.put(("blocked", step.name, covering))
+                    self.events.put(("blocked", step.name, covering,
+                                     step.x, step.y))
                     self.stop()
                     return
             self._click(step)
