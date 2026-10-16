@@ -4,7 +4,8 @@ import queue
 import sys
 import tkinter as tk
 from dataclasses import replace
-from tkinter import messagebox, simpledialog, ttk
+from pathlib import Path
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from pynput import keyboard, mouse
 
@@ -14,7 +15,7 @@ from .platform_support import (accessibility_trusted, find_window,
                                list_windows, window_info_at)
 from .playback import Player
 from .preparation import WindowPlayback
-from .profiles import Profile, ProfileStore
+from .profiles import Profile, ProfileStore, read_profile, write_profile
 
 APP_NAME = "ClickCue"
 TOGGLE_KEY = keyboard.Key.f6
@@ -142,6 +143,7 @@ class ClickCueApp:
         self.player: Player | None = None
         self.capture_armed = False
         self.current_profile: str | None = None
+        self.imported_profile_name: str | None = None
         self.target_window: TargetWindow | None = None
         self.dirty = False
         self._loading = False
@@ -196,6 +198,12 @@ class ClickCueApp:
                                ("Delete", self._delete_profile)]:
             ttk.Button(profile_controls, text=label, command=command).pack(
                 side="left", padx=(6, 0))
+        transfer_controls = ttk.Frame(profile_bar)
+        transfer_controls.pack(fill="x", pady=(6, 0))
+        for label, command in [("Import…", self._import_profile),
+                               ("Export…", self._export_profile)]:
+            ttk.Button(transfer_controls, text=label, command=command).pack(
+                side="left", padx=(0, 6))
         self.profile_errors_button = ttk.Button(
             profile_bar, command=self._show_profile_errors)
 
@@ -577,6 +585,7 @@ class ClickCueApp:
             self.repetitions.set(str(profile.repetitions))
             self.target_window = profile.target_window
             self.current_profile = profile.name
+            self.imported_profile_name = None
             self.dirty = False
         finally:
             self._loading = False
@@ -595,6 +604,7 @@ class ClickCueApp:
             self.repetitions.set("10")
             self.target_window = None
             self.current_profile = None
+            self.imported_profile_name = None
             self.dirty = False
         finally:
             self._loading = False
@@ -612,7 +622,8 @@ class ClickCueApp:
 
     def _save_profile_as(self) -> None:
         name = simpledialog.askstring("Save profile", "Profile name:",
-                                      parent=self.root)
+                                      parent=self.root,
+                                      initialvalue=self.imported_profile_name or "")
         if not name or not name.strip():
             return
         name = name.strip()
@@ -643,6 +654,7 @@ class ClickCueApp:
             return
         self.target_window = target_window
         self.current_profile = name
+        self.imported_profile_name = None
         self.dirty = False
         self._refresh_profile_list()
         self._update_title()
@@ -650,6 +662,55 @@ class ClickCueApp:
         suffix = (f" (target: {self.target_window.app})"
                   if self.target_window else "")
         self.status_text.set(f"Saved profile “{name}”{suffix}")
+
+    def _import_profile(self) -> None:
+        filename = filedialog.askopenfilename(
+            parent=self.root, title="Import profile",
+            filetypes=[("JSON profiles", "*.json"), ("All files", "*.*")])
+        if not filename:
+            return
+        try:
+            profile = read_profile(Path(filename))
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Import failed", f"Could not import profile: {exc}",
+                                 parent=self.root)
+            return
+        if not self._confirm_discard():
+            return
+        self._loading = True
+        try:
+            self.steps = profile.steps
+            self.loop_forever.set(profile.loop_forever)
+            self.repetitions.set(str(profile.repetitions))
+            self.target_window = profile.target_window
+            self.current_profile = None
+            self.imported_profile_name = profile.name
+            self.dirty = True
+        finally:
+            self._loading = False
+        self._refresh_table()
+        self._refresh_profile_list()
+        self._update_title()
+        self._update_target_text()
+        self.status_text.set(f"Imported “{profile.name}”; use Save to keep a local copy")
+
+    def _export_profile(self) -> None:
+        name = self.current_profile or self.imported_profile_name or "Unsaved sequence"
+        filename = filedialog.asksaveasfilename(
+            parent=self.root, title="Export profile", defaultextension=".json",
+            initialfile="profile.json",
+            filetypes=[("JSON profiles", "*.json"), ("All files", "*.*")])
+        if not filename:
+            return
+        try:
+            profile = Profile(name, list(self.steps), self.loop_forever.get(),
+                              self._repetition_count(), self.target_window)
+            write_profile(Path(filename), profile)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Export failed", f"Could not export profile: {exc}",
+                                 parent=self.root)
+            return
+        self.status_text.set(f"Exported profile to {filename}")
 
     def _delete_profile(self) -> None:
         name = self.profile_selection.get() or self.current_profile
