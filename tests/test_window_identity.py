@@ -123,15 +123,17 @@ def test_macos_actions_map_selected_cg_window_to_unique_ax_window(monkeypatch):
     entries[0]["kCGWindowBounds"] = dict(entries[1]["kCGWindowBounds"])
     ax_other["AXPosition"] = (100, 100)
     app["AXWindows"] = [ax_other]  # selected window absent from usable AX results
-    for selected_title, peer_title, ax_title in [
-            (None, "Other", "Other"), ("Document", None, "Document")]:
-        entries[1]["kCGWindowName"] = selected_title
-        entries[0]["kCGWindowName"] = peer_title
-        ax_other["AXTitle"] = ax_title
-        assert not platform.focus_window(selected)
-        assert not platform.move_window(replace(selected, x=50, y=60))
-        assert ax_other["AXPosition"] == (100, 100)
-        assert len(raised) == 1
+    for layer in (0, 3):
+        entries[0]["kCGWindowLayer"] = layer
+        for selected_title, peer_title, ax_title in [
+                (None, "Other", "Other"), ("Document", None, "Document")]:
+            entries[1]["kCGWindowName"] = selected_title
+            entries[0]["kCGWindowName"] = peer_title
+            ax_other["AXTitle"] = ax_title
+            assert not platform.focus_window(selected)
+            assert not platform.move_window(replace(selected, x=50, y=60))
+            assert ax_other["AXPosition"] == (100, 100)
+            assert len(raised) == 1
 
 
 def test_windows_coverage_requires_rectangle_and_native_receiver_agreement(monkeypatch):

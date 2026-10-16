@@ -146,7 +146,8 @@ def _macos_ax_window(window: TargetWindow):
     if current is None:
         return None
     title = (current.title or "").strip()
-    peers = [peer for peer in _macos_windows()
+    # AX candidates include floating panels excluded by the window picker.
+    peers = [peer for peer in _macos_windows(selectable=False)
              if peer.pid == current.pid and peer.same_bounds(current)
              # An unknown title cannot distinguish coincident CG windows.
              and (not title or not peer.title or not peer.title.strip()
