@@ -296,10 +296,25 @@ are rejected with an error rather than interpreted as an older format.
 ## Platform support
 
 Window anchoring and the click guard are best-effort safeguards, not a security
-boundary. macOS identifies targets by application name; Windows uses window
-titles. Another window from the same app or with the same title can be mistaken
-for the target. Linux does not provide these window safeguards. Test sequences
-in a harmless window first, and keep your start/stop hotkey available to stop playback.
+boundary. Each playback resolves one live native window and the guard checks
+that window's identity, including against other windows of the same app/title.
+Profiles save names and bounds, never native handles or PIDs. After loading,
+macOS application names and Windows titles must match exactly one selectable
+window; if missing or ambiguous, use **Choose…** to select it explicitly.
+The picker lists individual windows with a title/ID and position.
+
+Coverage checks include small, untitled, and nonstandard overlays, even when
+those windows are excluded from the picker. Rectangle coverage is conservative:
+transparent regions and invisible resize borders can block playback. Windows
+requires the native point lookup's root window and PID to agree with rectangle
+coverage; unknown or conflicting results block clicks. This does not guarantee
+input delivery under mouse capture or application-defined hit testing. macOS
+focus/move requires a unique public Accessibility bounds/title match; when
+that mapping is unavailable it declines the action rather than moving another
+window. Missing titles leave coincident macOS windows ambiguous, including
+offscreen windows and floating panels. OS permissions,
+disappearing/reused native IDs, and changes between checking and clicking remain best-effort limitations. Linux does not provide
+these window safeguards. Test sequences in a harmless window first, and keep your start/stop hotkey available to stop playback.
 
 | Platform | Status |
 |---|---|
@@ -307,8 +322,11 @@ in a harmless window first, and keep your start/stop hotkey available to stop pl
 | Windows | Supported by design (pynput + Win32 window focus), but untested — feedback welcome. No special permissions needed. |
 | Linux (X11) | Clicks and hotkeys work via pynput; window auto-focus is a no-op. Untested. |
 
-Coordinates are in screen points, so Retina/HiDPI displays work without
-scaling math. Window anchoring compensates for a moved or resized target
+Coordinates use screen points on macOS and physical pixels on Windows.
+Windows requires Windows 10 (1703+) and per-monitor DPI awareness, established
+before creating the GUI; window operations also use that coordinate context.
+Older profiles captured with a different Windows DPI context may need recapture.
+Window anchoring compensates for a moved or resized target
 window; moving another app's window uses the Accessibility API on macOS and
 `MoveWindow` on Windows.
 
