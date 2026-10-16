@@ -5,11 +5,14 @@ import sys
 import tkinter as tk
 from dataclasses import replace
 from pathlib import Path
+from threading import Lock
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from pynput import keyboard, mouse
 
 from .events import EventQueue
+from .hotkeys import (FUNCTION_KEYS, HotkeySettings, create_hotkey_listener,
+                      load_hotkeys, save_hotkeys)
 from .models import Step, TargetWindow
 from .platform_support import (accessibility_trusted, find_window,
                                list_windows, window_info_at)
@@ -18,8 +21,6 @@ from .preparation import WindowPlayback
 from .profiles import Profile, ProfileStore, read_profile, write_profile
 
 APP_NAME = "ClickCue"
-TOGGLE_KEY = keyboard.Key.f6
-CAPTURE_KEY = keyboard.Key.f8
 EVENT_POLL_MS = 80
 MAX_EVENTS_PER_POLL = 100
 
@@ -150,6 +151,9 @@ class ClickCueApp:
         self._blocked_status: str | None = None
         self._highlighted_step: int | None = None
         self.events: queue.Queue = EventQueue()
+        self.hotkeys = load_hotkeys()
+        self._hotkey_lock = Lock()
+        self._pressed_keys: set = set()
 
         self.loop_forever = tk.BooleanVar(value=True)
         self.repetitions = tk.StringVar(value="10")
@@ -169,7 +173,8 @@ class ClickCueApp:
         if start_listener:
             # Listener callbacks run on the listener thread; they only enqueue
             # events, which the Tk main loop consumes in _poll_events.
-            self.keyboard_listener = keyboard.Listener(on_press=self._on_key)
+            self.keyboard_listener = create_hotkey_listener(
+                on_press=self._on_key, on_release=self._on_key_release)
             self.keyboard_listener.start()
             self.root.after(400, self._check_permissions)
 
@@ -238,8 +243,11 @@ class ClickCueApp:
 
         step_bar = ttk.Frame(main)
         step_bar.pack(fill="x", pady=(8, 0))
-        for label, command in [("Capture (F8)", self._arm_capture),
-                               ("Add", self._add_step),
+        self.capture_button = ttk.Button(
+            step_bar, text=f"Capture ({self.hotkeys.capture})",
+            command=self._arm_capture)
+        self.capture_button.pack(side="left", padx=(0, 4))
+        for label, command in [("Add", self._add_step),
                                ("Edit", self._edit_step),
                                ("Copy", self._copy_step),
                                ("Remove", self._remove_step),
@@ -260,22 +268,37 @@ class ClickCueApp:
 
         control_bar = ttk.Frame(main)
         control_bar.pack(fill="x", pady=(10, 0))
-        self.start_button = ttk.Button(control_bar, text="▶ Start (F6)",
+        self.start_button = ttk.Button(control_bar, text=f"▶ Start ({self.hotkeys.toggle})",
                                        command=self._toggle_playback)
         self.start_button.pack(side="left")
         ttk.Label(control_bar, textvariable=self.status_text).pack(
             side="left", padx=(12, 0))
 
-        ttk.Label(main, text=self._hint_text(), wraplength=580,
-                  foreground="gray").pack(fill="x", pady=(10, 0))
+        hotkey_bar = ttk.LabelFrame(main, text="Global hotkeys (this machine)", padding=8)
+        hotkey_bar.pack(fill="x", pady=(10, 0))
+        self.toggle_key = tk.StringVar(value=self.hotkeys.toggle)
+        self.capture_key = tk.StringVar(value=self.hotkeys.capture)
+        for label, variable in (("Start/stop", self.toggle_key),
+                                ("Capture", self.capture_key)):
+            ttk.Label(hotkey_bar, text=label).pack(side="left", padx=(0, 4))
+            ttk.Combobox(hotkey_bar, textvariable=variable, values=FUNCTION_KEYS,
+                         state="readonly", width=5).pack(side="left", padx=(0, 12))
+        self.hotkey_apply_button = ttk.Button(
+            hotkey_bar, text="Apply", command=self._apply_hotkeys)
+        self.hotkey_apply_button.pack(side="left")
+        self.hotkey_hint = ttk.Label(main, text=self._hint_text(), wraplength=580,
+                                     foreground="gray")
+        self.hotkey_hint.pack(fill="x", pady=(10, 0))
 
-    @staticmethod
-    def _hint_text() -> str:
-        hotkeys = "Global hotkeys: F6 start/stop, F8 capture cursor position."
+    def _hint_text(self) -> str:
+        hotkeys = (f"Global hotkeys: {self.hotkeys.toggle} start/stop, "
+                   f"{self.hotkeys.capture} capture cursor position. "
+                   "Apply changes while stopped and capture is not armed.")
         if sys.platform == "darwin":
             return (f"{hotkeys} Requires Accessibility and Input Monitoring "
                     "permissions (System Settings → Privacy & Security) for "
-                    "the app running Python. On Mac keyboards use Fn+F6/Fn+F8 "
+                    f"the app running Python. On Mac keyboards use Fn+{self.hotkeys.toggle}/"
+                    f"Fn+{self.hotkeys.capture} "
                     "if the F-keys control brightness or volume.")
         return hotkeys
 
@@ -297,13 +320,42 @@ class ClickCueApp:
 
     # ------------------------------------------------------- background events
 
+    def _apply_hotkeys(self) -> None:
+        if self.player is not None or self.capture_armed:
+            messagebox.showinfo("Hotkeys", "Stop playback and finish capture before "
+                                "changing hotkeys.", parent=self.root)
+            return
+        try:
+            settings = HotkeySettings(self.toggle_key.get(), self.capture_key.get())
+            # Serialize configuration with callbacks, retaining held keys until
+            # release so changing bindings cannot turn a repeat into a new press.
+            with self._hotkey_lock:
+                save_hotkeys(settings)
+                self.hotkeys = settings
+        except (ValueError, OSError) as exc:
+            messagebox.showerror("Hotkeys not changed", str(exc), parent=self.root)
+            return
+        self.start_button.configure(text=f"▶ Start ({settings.toggle})")
+        self.capture_button.configure(text=f"Capture ({settings.capture})")
+        self.hotkey_hint.configure(text=self._hint_text())
+        self.status_text.set("Hotkeys saved for this machine")
+
     def _on_key(self, key) -> None:
-        if key == TOGGLE_KEY:
-            self.events.put(("hotkey_toggle",))
-        elif key == CAPTURE_KEY:
-            position = mouse.Controller().position
-            self.events.put(("hotkey_capture",
-                             int(position[0]), int(position[1])))
+        with self._hotkey_lock:
+            if key not in (getattr(keyboard.Key, name.lower()) for name in FUNCTION_KEYS):
+                return
+            if key in self._pressed_keys:
+                return
+            self._pressed_keys.add(key)
+            if key == getattr(keyboard.Key, self.hotkeys.toggle.lower()):
+                self.events.put(("hotkey_toggle",))
+            elif key == getattr(keyboard.Key, self.hotkeys.capture.lower()):
+                position = mouse.Controller().position
+                self.events.put(("hotkey_capture", int(position[0]), int(position[1])))
+
+    def _on_key_release(self, key) -> None:
+        with self._hotkey_lock:
+            self._pressed_keys.discard(key)
 
     def _poll_events(self) -> None:
         try:
@@ -332,7 +384,7 @@ class ClickCueApp:
             self._highlight_step(index)
         elif kind == "stopped":
             self.player = None
-            self.start_button.configure(text="▶ Start (F6)")
+            self.start_button.configure(text=f"▶ Start ({self.hotkeys.toggle})")
             self.status_text.set(self._blocked_status or "Stopped")
             self._blocked_status = None
             self._highlight_step(None)
@@ -360,7 +412,7 @@ class ClickCueApp:
             "1. Open System Settings → Privacy & Security → Accessibility\n"
             "2. Enable the app you run Python from (Terminal, iTerm, …)\n"
             "3. Quit this app and start it again\n\n"
-            "For the F6/F8 hotkeys, also enable that app under "
+            "For global hotkeys, also enable that app under "
             "Input Monitoring.",
             parent=self.root)
 
@@ -415,7 +467,7 @@ class ClickCueApp:
                              self._repetition_count(), self.events,
                              guard=windows.guard)
         self.player.start()
-        self.start_button.configure(text="■ Stop (F6)")
+        self.start_button.configure(text=f"■ Stop ({self.hotkeys.toggle})")
         self.status_text.set(prepared.status)
 
     def _repetition_count(self) -> int:
@@ -429,7 +481,7 @@ class ClickCueApp:
     def _arm_capture(self) -> None:
         self.capture_armed = True
         self.status_text.set("Capture armed: move the cursor to the target "
-                             "point and press F8")
+                             f"point and press {self.hotkeys.capture}")
 
     def _add_step(self, prefill: Step | None = None) -> None:
         dialog = StepDialog(self.root, "Add step", prefill)
