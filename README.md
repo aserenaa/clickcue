@@ -298,7 +298,8 @@ coverage; unknown or conflicting results block clicks. This does not guarantee
 input delivery under mouse capture or application-defined hit testing. macOS
 focus/move requires a unique public Accessibility bounds/title match; when
 that mapping is unavailable it declines the action rather than moving another
-window. Missing titles leave coincident macOS windows ambiguous. OS permissions,
+window. Missing titles leave coincident macOS windows ambiguous, including
+offscreen windows and floating panels. OS permissions,
 disappearing/reused native IDs, and changes between checking and clicking remain best-effort limitations. Linux does not provide
 these window safeguards. Test sequences in a harmless window first, and keep your start/stop hotkey available to stop playback.
 

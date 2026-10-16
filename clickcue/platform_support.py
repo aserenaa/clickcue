@@ -111,12 +111,14 @@ def move_window(window: TargetWindow) -> bool:
 
 # --------------------------------------------------------------------- macOS
 
-def _macos_windows(include_own: bool = False, selectable: bool = True):
-    """Yield front-to-back CG windows; picker filters never hide coverage."""
+def _macos_windows(include_own: bool = False, selectable: bool = True,
+                   *, on_screen_only: bool = True):
+    """Yield CG windows, front-to-back when restricted to onscreen windows."""
     try:
         import Quartz
-        entries = Quartz.CGWindowListCopyWindowInfo(
-            Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
+        options = (Quartz.kCGWindowListOptionOnScreenOnly if on_screen_only
+                   else Quartz.kCGWindowListOptionAll)
+        entries = Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID)
     except Exception:
         return
     for entry in entries:
@@ -146,8 +148,8 @@ def _macos_ax_window(window: TargetWindow):
     if current is None:
         return None
     title = (current.title or "").strip()
-    # AX candidates include floating panels excluded by the window picker.
-    peers = [peer for peer in _macos_windows(selectable=False)
+    # AX candidates can be offscreen or floating panels excluded by the picker.
+    peers = [peer for peer in _macos_windows(selectable=False, on_screen_only=False)
              if peer.pid == current.pid and peer.same_bounds(current)
              # An unknown title cannot distinguish coincident CG windows.
              and (not title or not peer.title or not peer.title.strip()

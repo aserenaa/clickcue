@@ -104,10 +104,15 @@ def test_macos_actions_map_selected_cg_window_to_unique_ax_window(monkeypatch):
         AXUIElementSetAttributeValue=set_attribute,
         AXUIElementPerformAction=lambda element, _: raised.append(element) or 0,
         kAXValueCGPointType=1, kAXValueCGSizeType=2))
+
+    def cg_windows(options, _relative):
+        return [entry for entry in entries
+                if not options & 1 or entry.get("kCGWindowIsOnscreen", True)]
+
     monkeypatch.setitem(sys.modules, "Quartz", SimpleNamespace(
         CGPoint=lambda x, y: (x, y), CGSize=lambda w, h: (w, h),
-        CGWindowListCopyWindowInfo=lambda *_: entries,
-        kCGWindowListOptionOnScreenOnly=1, kCGNullWindowID=0))
+        CGWindowListCopyWindowInfo=cg_windows,
+        kCGWindowListOptionAll=0, kCGWindowListOptionOnScreenOnly=1, kCGNullWindowID=0))
     assert platform.focus_window(selected)
     assert raised == [ax_selected]
     from dataclasses import replace
@@ -123,8 +128,12 @@ def test_macos_actions_map_selected_cg_window_to_unique_ax_window(monkeypatch):
     entries[0]["kCGWindowBounds"] = dict(entries[1]["kCGWindowBounds"])
     ax_other["AXPosition"] = (100, 100)
     app["AXWindows"] = [ax_other]  # selected window absent from usable AX results
-    for layer in (0, 3):
+    for layer, on_screen in [(0, True), (3, True), (0, False), (3, False)]:
         entries[0]["kCGWindowLayer"] = layer
+        entries[0]["kCGWindowIsOnscreen"] = on_screen
+        if not on_screen:
+            assert [window.native_id for window in platform.list_windows()] == [11]
+            assert platform.window_info_at(110, 110).native_id == 11
         for selected_title, peer_title, ax_title in [
                 (None, "Other", "Other"), ("Document", None, "Document")]:
             entries[1]["kCGWindowName"] = selected_title
