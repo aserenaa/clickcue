@@ -11,7 +11,7 @@ from clickcue.preparation import PreparationResult
 from clickcue.profiles import Profile, ProfileStore
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def runtime():
     try:
         root = tk.Tk()
@@ -111,6 +111,14 @@ def test_busy_callbacks_preserve_editor_and_profile_files(editor, monkeypatch, t
     app._export_profile()
     from clickcue.profiles import read_profile
     assert read_profile(exported).steps == before
+    diagnostics = button(app, "Diagnostics")
+    assert diagnostics.instate(["!disabled"])
+    diagnostics.invoke()
+    panel = next(w for w in app.root.winfo_children() if isinstance(w, tk.Toplevel))
+    assert app.root.grab_current() is None
+    assert app.steps == before
+    assert app.target_window.app == "Original target"
+    panel.destroy()
     assert {p.name: p.read_bytes() for p in app.store.directory.iterdir()} == files
 
 
