@@ -153,6 +153,7 @@ class ClickCueApp:
         self._loading = False
         self._playing_anchor: TargetWindow | None = None
         self._blocked_status: str | None = None
+        self._highlighted_step: int | None = None
         self.events: queue.Queue = EventQueue()
 
         self.loop_forever = tk.BooleanVar(value=True)
@@ -553,6 +554,8 @@ class ClickCueApp:
         return self.tree.index(selection[0]) if selection else None
 
     def _refresh_table(self, select: int | None = None) -> None:
+        # Rebuilt rows must be highlighted again, even at the same index.
+        self._highlighted_step = None
         self.tree.delete(*self.tree.get_children())
         for index, step in enumerate(self.steps):
             self.tree.insert("", "end", values=(index + 1, step.name,
@@ -564,6 +567,9 @@ class ClickCueApp:
             self.tree.selection_set(self.tree.get_children()[select])
 
     def _highlight_step(self, index: int | None) -> None:
+        if index is not None and index == self._highlighted_step:
+            return
+        self._highlighted_step = None
         children = self.tree.get_children()
         self.tree.selection_remove(*children)
         if index is not None and 0 <= index < len(children):
@@ -571,6 +577,7 @@ class ClickCueApp:
             self.tree.selection_set(item)
             self.tree.focus(item)
             self.tree.see(item)
+            self._highlighted_step = index
 
     def _mark_dirty(self) -> None:
         if not self._loading:
