@@ -20,8 +20,7 @@ def windows(monkeypatch):
 
 
 @pytest.fixture
-def preparation(windows, monkeypatch):
-    monkeypatch.setattr("clickcue.preparation.time.sleep", Mock())
+def preparation(windows):
     return windows
 
 
@@ -158,3 +157,34 @@ def test_player_stop_interrupts_focus_retry_without_click_or_block(windows, monk
     finally:
         player.stop()
         player.join(timeout=2)
+
+
+def test_stop_interrupts_preparation_settle_wait_before_coverage_check(windows):
+    settling = threading.Event()
+
+    class SettleEvent(threading.Event):
+        def wait(self, timeout=None):
+            settling.set()
+            return super().wait(timeout)
+
+    playback = WindowPlayback(TargetWindow("Target"))
+    playback.cancelled = SettleEvent()
+    windows["find_window"].return_value = TargetWindow("Target")
+    events = queue.Queue()
+
+    def prepare():
+        try:
+            playback.prepare([Step("Click", 17, 29, 0)])
+        except InterruptedError:
+            events.put("cancelled")
+
+    worker = threading.Thread(target=prepare)
+    worker.start()
+    try:
+        assert settling.wait(2)
+        playback.cancelled.set()
+        assert events.get(timeout=0.2) == "cancelled"
+        windows["window_info_at"].assert_not_called()
+    finally:
+        playback.cancelled.set()
+        worker.join(timeout=2)

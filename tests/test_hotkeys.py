@@ -133,6 +133,7 @@ def test_preferences_round_trip_and_failed_replace_preserves_previous_file(tmp_p
 def settings_app(app, monkeypatch, tmp_path):
     app.root = Mock()
     app.player = None
+    app._preparation = None
     app.capture_armed = False
     app.toggle_key = Mock(get=Mock(return_value="F2"))
     app.capture_key = Mock(get=Mock(return_value="F10"))
@@ -163,7 +164,7 @@ def test_apply_persists_bindings_updates_labels_and_retains_held_state(settings_
     assert list(app.events.queue) == [("hotkey_toggle",), ("hotkey_capture", 12, 34)]
 
 
-@pytest.mark.parametrize("reason", ["conflict", "playing", "capturing", "save_error"])
+@pytest.mark.parametrize("reason", ["conflict", "playing", "preparing", "capturing", "save_error"])
 def test_apply_rejection_keeps_active_bindings_and_preferences(settings_app, monkeypatch, tmp_path, reason):
     app = settings_app
     error = Mock()
@@ -174,6 +175,8 @@ def test_apply_rejection_keeps_active_bindings_and_preferences(settings_app, mon
         app.capture_key.get.return_value = "F2"
     elif reason == "playing":
         app.player = Mock()
+    elif reason == "preparing":
+        app._preparation = Mock()
     elif reason == "capturing":
         app.capture_armed = True
     else:

@@ -17,7 +17,7 @@ from .models import Step, TargetWindow
 from .platform_support import (accessibility_trusted, find_window,
                                list_windows, window_info_at)
 from .playback import Player
-from .preparation import WindowPlayback
+from .preparation import PlaybackPreparation
 from .profiles import Profile, ProfileStore, read_profile, write_profile
 
 APP_NAME = "ClickCue"
@@ -142,6 +142,8 @@ class ClickCueApp:
         self.steps: list[Step] = []
         self.store = ProfileStore()
         self.player: Player | None = None
+        self._preparation: PlaybackPreparation | None = None
+        self._closed = False
         self.capture_armed = False
         self.current_profile: str | None = None
         self.imported_profile_name: str | None = None
@@ -321,7 +323,7 @@ class ClickCueApp:
     # ------------------------------------------------------- background events
 
     def _apply_hotkeys(self) -> None:
-        if self.player is not None or self.capture_armed:
+        if self.player is not None or self.capture_armed or self._preparation is not None:
             messagebox.showinfo("Hotkeys", "Stop playback and finish capture before "
                                 "changing hotkeys.", parent=self.root)
             return
@@ -367,7 +369,9 @@ class ClickCueApp:
 
     def _handle_event(self, event: tuple) -> None:
         kind = event[0]
-        if kind == "hotkey_toggle":
+        if kind == "prepared":
+            self._finish_preparation(event[1])
+        elif kind == "hotkey_toggle":
             self._toggle_playback()
         elif kind == "hotkey_capture":
             if self.capture_armed:
@@ -448,6 +452,13 @@ class ClickCueApp:
     # ------------------------------------------------------------- playback
 
     def _toggle_playback(self) -> None:
+        if self._closed:
+            return
+        if self._preparation is not None:
+            self._preparation.windows.cancelled.set()
+            self.start_button.configure(text="Cancelling…", state="disabled")
+            self.status_text.set("Cancelling preparation…")
+            return
         if self.player is not None:
             self.player.stop()
             return
@@ -455,16 +466,38 @@ class ClickCueApp:
             messagebox.showinfo("No steps",
                                 "Add at least one step to the sequence.")
             return
-        windows = WindowPlayback(self.target_window)
-        prepared = windows.prepare(self.steps)
-        if prepared.missing_target and not messagebox.askyesno(
+        self._preparation = PlaybackPreparation(
+            self.steps, self.target_window, self.loop_forever.get(),
+            self._repetition_count(), self.events)
+        self.start_button.configure(text=f"■ Stop ({self.hotkeys.toggle})")
+        self.status_text.set("Preparing…")
+        self._preparation.start()
+
+    def _finish_preparation(self, preparation: PlaybackPreparation) -> None:
+        if self._closed or preparation is not self._preparation:
+            return
+        windows = preparation.windows
+        prepared = preparation.result
+        accepted = not windows.cancelled.is_set()
+        if accepted and preparation.error is not None:
+            accepted = False
+            messagebox.showerror("Preparation failed", str(preparation.error))
+        if accepted and prepared is not None and prepared.missing_target:
+            accepted = messagebox.askyesno(
                 "Target window not found",
-                f"No window of “{self.target_window.app}” is open.\n\n"
-                "Play with the saved absolute coordinates anyway?"):
+                f"No window of “{windows.anchor.app}” is open.\n\n"
+                "Play with the saved absolute coordinates anyway?")
+        # Dialogs run a nested Tk loop; Stop or Close may have occurred there.
+        if self._closed or preparation is not self._preparation:
+            return
+        self._preparation = None
+        self.start_button.configure(text=f"▶ Start ({self.hotkeys.toggle})", state="normal")
+        if not accepted or windows.cancelled.is_set() or prepared is None:
+            self.status_text.set("Stopped")
             return
         self._blocked_status = None
-        self.player = Player(prepared.steps, self.loop_forever.get(),
-                             self._repetition_count(), self.events,
+        self.player = Player(prepared.steps, preparation.loop_forever,
+                             preparation.repetitions, self.events,
                              guard=windows.guard)
         self.player.start()
         self.start_button.configure(text=f"■ Stop ({self.hotkeys.toggle})")
@@ -791,6 +824,10 @@ class ClickCueApp:
     def _on_close(self) -> None:
         if self.dirty and not self._confirm_discard():
             return
+        self._closed = True
+        if self._preparation is not None:
+            self._preparation.windows.cancelled.set()
+            self._preparation = None
         if self.player is not None:
             self.player.stop()
         if self.keyboard_listener is not None:

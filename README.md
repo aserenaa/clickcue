@@ -178,6 +178,11 @@ that do not conflict with shortcuts in your target app or operating system.
    stops playback, cancelling a pending click during guard focus retries or during
    the wait before pressing. If the mouse button is already held, stopping
    releases it promptly. A press already being sent to the OS may still occur.
+   Window preparation runs in the background using a snapshot of the steps,
+   repeat settings, and anchor at Start. Stop/F6 also cancels preparation;
+   cancelling prevents playback even if an OS window call finishes later.
+   OS window calls cannot be interrupted, so another Start becomes available
+   once the pending call returns. Changes in the editor apply to the next run.
 6. Save the sequence as a profile (*Save As…*) and reload it from the
    dropdown. *New* starts a fresh sequence.
 
