@@ -40,6 +40,17 @@ for next time. **F6** starts or stops playback even when another app has focus.
   coordinates, and a delay in seconds before it fires.
 - ⏳ **Wait-only steps** — pause without moving the pointer or clicking. In the
   Add/Edit dialog, enable *Wait only (no click)* and enter the delay.
+- **Preview only** — while stopped and capture is not armed, choose **Preview
+  only…** to see numbered click positions on a scaled coordinate map, with
+  names, exact recorded coordinates, and delays below. Negative coordinates
+  remain visible; repeated positions share a marker. Wait steps keep their
+  sequence numbers in the list but have no marker. Add a click step if the
+  sequence is empty or contains only waits. Close with **Escape** or **Close
+  preview**. Start/capture hotkeys are ignored while preview is open.
+  Preview sends no input and leaves the target window untouched. The map uses
+  recorded absolute coordinates, not a live screen overlay or monitor layout;
+  playback may adjust coordinates for a moved or resized target. Nearby marker
+  labels can overlap; use the list to read each step's exact position.
 - 📍 **Visual capture** — hover the cursor over the target and press **F8**; the
   position is captured without sending a click to the app underneath.
 - 📋 **Copy multiple steps** — select a range or separate steps and duplicate
