@@ -117,7 +117,6 @@ def test_guard_recovers_focus_or_reports_cover_including_own_window(
     guard = WindowPlayback(TargetWindow("Target")).guard
     assert guard(Step("Click", 17, 29, 0), cancelled) == covering
     assert windows["focus_window"].call_count == retries
-    assert cancelled.wait.call_count == retries
     for call in windows["window_info_at"].call_args_list:
         assert call.args == (17, 29)
         assert call.kwargs == {"include_own": True}

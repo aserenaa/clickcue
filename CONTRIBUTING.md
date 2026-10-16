@@ -35,9 +35,9 @@ Ruff checks fatal errors, undefined names, bug-prone patterns (`B`), and imports
 `gui.py` and `platform_support.py`, plus an unused loop variable in
 `platform_support.py`, have narrow per-file exceptions pending source fixes.
 Mypy checks the model, profile persistence, playback, and window preparation
-modules, including unannotated function bodies, using `types-pynput` for the mouse API. This is an
-incremental gate; it does not yet require complete annotations or check the GUI
-and platform integrations.
+modules, including unannotated function bodies, using `types-pynput` for the
+mouse API. This is an incremental gate; it does not yet require complete
+annotations or check the GUI and platform integrations.
 
 When changing dependencies, edit `pyproject.toml` and regenerate the pinned set
 with the recorded resolver version (the universal resolution covers Python

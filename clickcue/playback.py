@@ -20,7 +20,7 @@ PRESS_HOLD_SECONDS = 0.02
 
 # Returns None when it is safe to click the step, or the name of the window
 # covering the click point when it is not. The event is set by stop(); guards
-# must use it to interrupt retry waits.
+# must use it to interrupt retry waits. Player discards the result after stop.
 ClickGuard = Callable[[Step, threading.Event], str | None]
 
 

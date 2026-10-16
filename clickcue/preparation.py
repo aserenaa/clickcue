@@ -90,7 +90,8 @@ class WindowPlayback:
     def guard(self, step: Step, cancelled: Event) -> str | None:
         """Runs on the player thread before every click: allow it only when
         the target window is on top at the click point. Tries to refocus the
-        target first; returns the covering window's name when it gives up."""
+        target first; returns the covering window's name when it gives up.
+        Cancellation interrupts retry waits; Player then skips the click."""
         anchor = self.anchor
         if anchor is None:
             return None
