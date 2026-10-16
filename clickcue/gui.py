@@ -485,6 +485,11 @@ class ClickCueApp:
         self._preview_active = True
         try:
             show_preview(self.root, [replace(step) for step in self.steps])
+        except (OverflowError, ValueError):
+            messagebox.showerror(
+                "Preview unavailable", "The recorded coordinates are too large to "
+                "display. Edit the click coordinates and try previewing again. "
+                "No input was sent.", parent=self.root)
         finally:
             self._preview_active = False
 

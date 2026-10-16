@@ -157,6 +157,41 @@ def test_preview_renders_recorded_positions_without_input_and_releases_hotkeys(
     app.events.put.assert_called_once_with(("hotkey_toggle",))
 
 
+def test_preview_unrenderable_coordinates_destroy_dialog_before_releasing_guard(monkeypatch):
+    app = editor([])
+    app.steps = [Step("Origin", 0, 0, 0), Step("Large", 10**400, 0, 0)]
+    original = [replace(step) for step in app.steps]
+    app._toggle_playback = Mock()
+    dialog = Mock()
+    monkeypatch.setattr("clickcue.preview.tk.Toplevel", Mock(return_value=dialog))
+    for widget in ("Frame", "Label"):
+        monkeypatch.setattr(f"clickcue.preview.ttk.{widget}", Mock())
+
+    def destroyed():
+        assert app._preview_active
+
+    def report_error(*args, **kwargs):
+        dialog.destroy.assert_called_once()
+        assert app._preview_active
+        app._handle_event(("hotkey_toggle",))
+        app._toggle_playback.assert_not_called()
+
+    dialog.destroy.side_effect = destroyed
+    error = Mock(side_effect=report_error)
+    monkeypatch.setattr("clickcue.gui.messagebox.showerror", error)
+
+    app._preview_sequence()
+
+    error.assert_called_once()
+    assert "coordinates" in error.call_args.args[1]
+    assert "Edit" in error.call_args.args[1]
+    assert app.steps == original
+    assert not app.dirty
+    assert not app._preview_active
+    app._handle_event(("hotkey_toggle",))
+    app._toggle_playback.assert_called_once()
+
+
 def assert_rows_match_steps(app):
     assert [row[1] for row in app.tree.rows.values()] == [step.name for step in app.steps]
 
