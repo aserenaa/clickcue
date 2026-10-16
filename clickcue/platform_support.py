@@ -145,9 +145,12 @@ def _macos_ax_window(window: TargetWindow):
     current = find_window(window)
     if current is None:
         return None
+    title = (current.title or "").strip()
     peers = [peer for peer in _macos_windows()
              if peer.pid == current.pid and peer.same_bounds(current)
-             and peer.title == current.title]
+             # An unknown title cannot distinguish coincident CG windows.
+             and (not title or not peer.title or not peer.title.strip()
+                  or peer.title.strip() == title)]
     if len(peers) != 1:
         return None
     error, windows = AXUIElementCopyAttributeValue(
@@ -167,9 +170,9 @@ def _macos_ax_window(window: TargetWindow):
         bounds = (*point, *extent)
         if bounds != (current.x, current.y, current.width, current.height):
             continue
-        if current.title:
-            te, title = AXUIElementCopyAttributeValue(candidate, "AXTitle", None)
-            if te or title != current.title:
+        if title:
+            te, ax_title = AXUIElementCopyAttributeValue(candidate, "AXTitle", None)
+            if te or not ax_title or ax_title.strip() != title:
                 continue
         matches.append(candidate)
     return matches[0] if len(matches) == 1 else None
@@ -249,6 +252,8 @@ def _windows_user32():
     signatures = {
         "GetTopWindow": ([wintypes.HWND], wintypes.HWND),
         "GetWindow": ([wintypes.HWND, wintypes.UINT], wintypes.HWND),
+        "WindowFromPoint": ([wintypes.POINT], wintypes.HWND),
+        "GetAncestor": ([wintypes.HWND, wintypes.UINT], wintypes.HWND),
         "IsWindowVisible": ([wintypes.HWND], wintypes.BOOL),
         "GetWindowTextLengthW": ([wintypes.HWND], ctypes.c_int),
         "GetWindowTextW": ([wintypes.HWND, wintypes.LPWSTR, ctypes.c_int], ctypes.c_int),
@@ -316,12 +321,31 @@ def _windows_list_windows(selectable: bool = True) -> list[TargetWindow]:
 
 
 def _windows_window_at(x: int, y: int) -> TargetWindow | None:
-    # WindowFromPoint skips disabled windows. Z-order rectangle coverage is
-    # intentionally conservative, including untitled/disabled/small overlays.
+    # Rectangle coverage blocks even overlays skipped by WindowFromPoint.
+    # Native point lookup must also agree: a layered target's transparent hole
+    # may send input underneath its rectangle. Neither check alone authorizes.
     for window in _windows_list_windows(selectable=False):
         if (window.x <= x < window.x + window.width
                 and window.y <= y < window.y + window.height):
-            return window
+            try:
+                ctypes, user32 = _windows_user32()
+                from ctypes import wintypes
+                previous = user32.SetThreadDpiAwarenessContext(-3)
+                if not previous:
+                    return None
+                try:
+                    receiver = user32.WindowFromPoint(wintypes.POINT(x, y))
+                    root = user32.GetAncestor(receiver, 2) if receiver else None
+                    if root != window.native_id:
+                        return None
+                    pid = wintypes.DWORD()
+                    if not user32.GetWindowThreadProcessId(root, ctypes.byref(pid)):
+                        return None
+                    return window if pid.value == window.pid else None
+                finally:
+                    user32.SetThreadDpiAwarenessContext(previous)
+            except Exception:
+                return None
     return None
 
 

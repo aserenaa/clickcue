@@ -281,11 +281,14 @@ The picker lists individual windows with a title/ID and position.
 
 Coverage checks include small, untitled, and nonstandard overlays, even when
 those windows are excluded from the picker. Rectangle coverage is conservative:
-transparent regions and invisible resize borders can block playback. macOS
+transparent regions and invisible resize borders can block playback. Windows
+requires the native point lookup's root window and PID to agree with rectangle
+coverage; unknown or conflicting results block clicks. This does not guarantee
+input delivery under mouse capture or application-defined hit testing. macOS
 focus/move requires a unique public Accessibility bounds/title match; when
 that mapping is unavailable it declines the action rather than moving another
-window. OS permissions, disappearing/reused native IDs, and changes between
-checking and clicking remain best-effort limitations. Linux does not provide
+window. Missing titles leave coincident macOS windows ambiguous. OS permissions,
+disappearing/reused native IDs, and changes between checking and clicking remain best-effort limitations. Linux does not provide
 these window safeguards. Test sequences in a harmless window first, and keep your start/stop hotkey available to stop playback.
 
 | Platform | Status |

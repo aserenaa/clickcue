@@ -119,14 +119,29 @@ def test_macos_actions_map_selected_cg_window_to_unique_ax_window(monkeypatch):
     assert not platform.focus_window(selected)
     assert not platform.move_window(selected)
     assert len(raised) == 1
+    entries.pop()
+    entries[0]["kCGWindowBounds"] = dict(entries[1]["kCGWindowBounds"])
+    ax_other["AXPosition"] = (100, 100)
+    app["AXWindows"] = [ax_other]  # selected window absent from usable AX results
+    for selected_title, peer_title, ax_title in [
+            (None, "Other", "Other"), ("Document", None, "Document")]:
+        entries[1]["kCGWindowName"] = selected_title
+        entries[0]["kCGWindowName"] = peer_title
+        ax_other["AXTitle"] = ax_title
+        assert not platform.focus_window(selected)
+        assert not platform.move_window(replace(selected, x=50, y=60))
+        assert ax_other["AXPosition"] == (100, 100)
+        assert len(raised) == 1
 
 
-def test_windows_coverage_keeps_untitled_overlay_and_pointer_sized_identity(monkeypatch):
+def test_windows_coverage_requires_rectangle_and_native_receiver_agreement(monkeypatch):
     import ctypes
     from ctypes import wintypes
 
-    overlay, target = 0x100000001, 0x100000002
+    overlay, target, underneath = 0x100000001, 0x100000002, 0x100000003
     context = [123]
+    receiver = [target]
+    hit_contexts = []
 
     def dpi(value):
         previous, context[0] = context[0], value
@@ -140,29 +155,57 @@ def test_windows_coverage_keeps_untitled_overlay_and_pointer_sized_identity(monk
         return 1
 
     def pid(hwnd, pointer):
-        ctypes.cast(pointer, ctypes.POINTER(wintypes.DWORD)).contents.value = 101
+        process = ctypes.cast(pointer, ctypes.POINTER(wintypes.DWORD)).contents
+        process.value = 102 if hwnd == underneath else 101
         return 1
 
     top = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)(lambda _: overlay)
     below = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint)(
-        lambda hwnd, _: target if hwnd == overlay else 0)
+        lambda hwnd, _: {overlay: target, target: underneath}.get(hwnd, 0))
     # A ctypes loader defaults to c_int; the platform adapter must correct it.
     top.restype = below.restype = ctypes.c_int
+
+    def hit_test(_point):
+        hit_contexts.append(context[0])
+        return receiver[0]
+
+    hit = ctypes.CFUNCTYPE(ctypes.c_void_p, wintypes.POINT)(hit_test)
+    root = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint)(
+        lambda hwnd, _: hwnd)
+    hit.restype = root.restype = ctypes.c_int
+    titles = {target: "Editor", underneath: "Other"}
+
+    def window_text(hwnd, buffer, _length):
+        buffer.value = titles.get(hwnd, "")
+        return len(buffer.value)
+
     api = SimpleNamespace(
         GetTopWindow=top, GetWindow=below,
         IsWindowVisible=Mock(return_value=1),
-        GetWindowTextLengthW=Mock(side_effect=lambda hwnd: 0 if hwnd == overlay else 6),
-        GetWindowTextW=Mock(side_effect=lambda hwnd, buffer, _: setattr(buffer, "value", "Editor") or 6),
+        GetWindowTextLengthW=Mock(side_effect=lambda hwnd: len(titles.get(hwnd, ""))),
+        GetWindowTextW=Mock(side_effect=window_text),
         GetWindowRect=Mock(side_effect=rect),
         GetWindowThreadProcessId=Mock(side_effect=pid),
         SetForegroundWindow=Mock(), MoveWindow=Mock(),
         SetThreadDpiAwarenessContext=Mock(side_effect=dpi),
-        WindowFromPoint=Mock(return_value=target), GetAncestor=Mock(return_value=target))
+        WindowFromPoint=hit, GetAncestor=root)
     monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: api, raising=False)
-    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(user32=api), raising=False)
     monkeypatch.setattr(sys, "platform", "win32")
-    top_window = platform.window_info_at(-90, -90, include_own=True)
-    assert top_window is not None and top_window.native_id == overlay
-    assert top_window.pid == 101
-    assert [window.native_id for window in platform.list_windows()] == [target]
+    assert [window.native_id for window in platform.list_windows()] == [target, underneath]
+    monkeypatch.setattr("clickcue.preparation.time.sleep", Mock())
+    monkeypatch.setattr("clickcue.preparation.focus_window", Mock())
+    playback = WindowPlayback(TargetWindow("Editor"))
+    step = Step("Click", 0, 0, 0)  # target rectangle, outside the small overlay
+    playback.prepare([step])
+    cancelled = Mock(spec=threading.Event)
+    cancelled.is_set.return_value = cancelled.wait.return_value = False
+    assert playback.guard(step, cancelled) is None  # receiver agrees, including >32-bit HWND
+    receiver[0] = underneath  # transparent hole in selected rectangle passes input below
+    assert playback.guard(step, cancelled) == "no window detected"
+    receiver[0] = 0
+    assert playback.guard(step, cancelled) == "no window detected"
+    receiver[0] = target
+    # Receiver agreement with a window underneath must not look through an overlay.
+    assert platform.window_info_at(-90, -90, include_own=True) is None
     assert context[0] == 123
+    assert hit_contexts and set(hit_contexts) == {-3}
