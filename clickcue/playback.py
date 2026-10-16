@@ -77,11 +77,19 @@ class Player(threading.Thread):
                                      step.x, step.y))
                     self.stop()
                     return
+            if self._stop_event.is_set():
+                return
             self._click(step)
 
     def _click(self, step: Step) -> None:
         self._mouse.position = (step.x, step.y)
-        time.sleep(PRESS_HOLD_SECONDS)
-        self._mouse.press(mouse.Button.left)
-        time.sleep(PRESS_HOLD_SECONDS)
-        self._mouse.release(mouse.Button.left)
+        if self._stop_event.wait(PRESS_HOLD_SECONDS):
+            return
+        if self._stop_event.is_set():
+            return
+        try:
+            self._mouse.press(mouse.Button.left)
+            self._stop_event.wait(PRESS_HOLD_SECONDS)
+        finally:
+            # A backend may send the press before raising an error.
+            self._mouse.release(mouse.Button.left)
