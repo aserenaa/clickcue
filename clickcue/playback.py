@@ -19,8 +19,9 @@ FOCUS_GRACE_SECONDS = 0.3
 PRESS_HOLD_SECONDS = 0.02
 
 # Returns None when it is safe to click the step, or the name of the window
-# covering the click point when it is not.
-ClickGuard = Callable[[Step], str | None]
+# covering the click point when it is not. The event is set by stop(); guards
+# must use it to interrupt retry waits. Player discards the result after stop.
+ClickGuard = Callable[[Step, threading.Event], str | None]
 
 
 class Player(threading.Thread):
@@ -73,7 +74,9 @@ class Player(threading.Thread):
             if step.wait_only:
                 continue
             if self.guard is not None:
-                covering = self.guard(step)
+                covering = self.guard(step, self._stop_event)
+                if self._stop_event.is_set():
+                    return
                 if covering is not None:
                     # Never click outside the target window; stop instead.
                     self.events.put(("blocked", step.name, covering,

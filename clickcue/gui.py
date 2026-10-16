@@ -2,7 +2,6 @@
 
 import queue
 import sys
-import time
 import tkinter as tk
 from dataclasses import replace
 from tkinter import messagebox, simpledialog, ttk
@@ -12,9 +11,9 @@ from pynput import keyboard, mouse
 from .events import EventQueue
 from .models import Step, TargetWindow
 from .platform_support import (accessibility_trusted, find_window,
-                               focus_window, focus_window_at, list_windows,
-                               move_window, window_info_at)
+                               list_windows, window_info_at)
 from .playback import Player
+from .preparation import WindowPlayback
 from .profiles import Profile, ProfileStore
 
 APP_NAME = "ClickCue"
@@ -146,7 +145,6 @@ class ClickCueApp:
         self.target_window: TargetWindow | None = None
         self.dirty = False
         self._loading = False
-        self._playing_anchor: TargetWindow | None = None
         self._blocked_status: str | None = None
         self._highlighted_step: int | None = None
         self.events: queue.Queue = EventQueue()
@@ -397,93 +395,20 @@ class ClickCueApp:
             messagebox.showinfo("No steps",
                                 "Add at least one step to the sequence.")
             return
-        prepared = self._prepare_playback()
-        if prepared is None:
+        windows = WindowPlayback(self.target_window)
+        prepared = windows.prepare(self.steps)
+        if prepared.missing_target and not messagebox.askyesno(
+                "Target window not found",
+                f"No window of “{self.target_window.app}” is open.\n\n"
+                "Play with the saved absolute coordinates anyway?"):
             return
-        steps, status = prepared
         self._blocked_status = None
-        self._playing_anchor = self.target_window
-        self.player = Player(steps, self.loop_forever.get(),
+        self.player = Player(prepared.steps, self.loop_forever.get(),
                              self._repetition_count(), self.events,
-                             guard=self._click_guard)
+                             guard=windows.guard)
         self.player.start()
         self.start_button.configure(text="■ Stop (F6)")
-        self.status_text.set(status)
-
-    def _prepare_playback(self) -> tuple[list[Step], str] | None:
-        """Focus the target, restore its bounds if possible, and return the
-        steps to play — coordinate-adjusted when the window cannot be moved
-        back to where the profile was recorded."""
-        anchor = self.target_window
-        first = next((step for step in self.steps if not step.wait_only), None)
-        if first is None:
-            return list(self.steps), "Playing waits…"
-        if anchor is None:
-            app = focus_window_at(first.x, first.y)
-            return list(self.steps), (f"Playing on “{app}”…" if app
-                                      else "Playing…")
-
-        current = find_window(anchor.app)
-        if current is None:
-            if not messagebox.askyesno(
-                    "Target window not found",
-                    f"No window of “{anchor.app}” is open.\n\n"
-                    "Play with the saved absolute coordinates anyway?"):
-                return None
-            return list(self.steps), "Playing (target window not found)…"
-
-        focus_window(current)
-        if not anchor.has_bounds or current.same_bounds(anchor):
-            return self._verified(anchor, list(self.steps),
-                                  f"Playing on “{anchor.app}”…")
-
-        if move_window(anchor):
-            restored = find_window(anchor.app)
-            if restored and restored.same_bounds(anchor):
-                return self._verified(
-                    anchor, list(self.steps),
-                    f"Playing on “{anchor.app}” (window restored)…")
-            current = restored or current
-
-        scale_x = current.width / anchor.width
-        scale_y = current.height / anchor.height
-        adjusted = [
-            replace(step,
-                    x=round(current.x + (step.x - anchor.x) * scale_x),
-                    y=round(current.y + (step.y - anchor.y) * scale_y))
-            if not step.wait_only else step
-            for step in self.steps
-        ]
-        return self._verified(
-            anchor, adjusted,
-            f"Playing on “{anchor.app}” (coordinates adjusted)…")
-
-    def _verified(self, anchor: TargetWindow, steps: list[Step],
-                  status: str) -> tuple[list[Step], str]:
-        """Warn when another window still covers the first click point."""
-        time.sleep(0.25)  # let the focus change settle before checking
-        first = next(step for step in steps if not step.wait_only)
-        on_top = window_info_at(first.x, first.y)
-        if on_top and on_top.app != anchor.app:
-            status += f"  ⚠ “{on_top.app}” is covering the click area"
-        return steps, status
-
-    def _click_guard(self, step: Step) -> str | None:
-        """Runs on the player thread before every click: allow it only when
-        the target window is on top at the click point. Tries to refocus the
-        target first; returns the covering window's name when it gives up."""
-        anchor = self._playing_anchor
-        if anchor is None:
-            return None
-        on_top = None
-        for attempt in range(3):
-            on_top = window_info_at(step.x, step.y, include_own=True)
-            if on_top and on_top.app == anchor.app:
-                return None
-            if attempt < 2:
-                focus_window(anchor)
-                time.sleep(0.4)
-        return on_top.app if on_top else "no window detected"
+        self.status_text.set(prepared.status)
 
     def _repetition_count(self) -> int:
         try:
