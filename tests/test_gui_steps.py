@@ -1,5 +1,6 @@
 from dataclasses import replace
 from enum import Enum
+from queue import Queue
 from threading import Lock
 from unittest.mock import Mock
 
@@ -53,6 +54,10 @@ def editor(selection):
     app.root = Mock()
     app.player = None
     app.capture_armed = False
+    app._preparation = None
+    app._preview_active = False
+    app._closed = False
+    app._closing = False
     app._undo_history = []
     app._redo_history = []
     app._loading = False
@@ -69,17 +74,23 @@ def test_preview_requires_clicks_and_stopped_capture_or_playback(monkeypatch):
     app = editor([])
     notice = Mock()
     monkeypatch.setattr("clickcue.gui.messagebox.showinfo", notice)
-    for steps, player, capturing, hint in [
-        ([], None, False, "Add"),
-        ([Step("Pause", 100, 200, 1, True)], None, False, "wait"),
-        ([Step("Click", 1, 2, 0)], Mock(), False, "Stop"),
-        ([Step("Click", 1, 2, 0)], None, True, "capture"),
+    preview = Mock()
+    monkeypatch.setattr("clickcue.gui.show_preview", preview)
+    for steps, player, preparing, capturing, previewing, hint in [
+        ([], None, None, False, False, "Add"),
+        ([Step("Pause", 100, 200, 1, True)], None, None, False, False, "wait"),
+        ([Step("Click", 1, 2, 0)], Mock(), None, False, False, "Stop"),
+        ([Step("Click", 1, 2, 0)], None, None, True, False, "capture"),
+        ([Step("Click", 1, 2, 0)], None, Mock(), False, False, "Stop"),
+        ([Step("Click", 1, 2, 0)], None, None, False, True, "preview"),
     ]:
         app.steps, app.player, app.capture_armed = steps, player, capturing
+        app._preparation, app._preview_active = preparing, previewing
         notice.reset_mock()
         app._preview_sequence()
         notice.assert_called_once()
         assert hint in notice.call_args.args[1]
+    preview.assert_not_called()
 
 
 @pytest.mark.parametrize("coordinates", [
@@ -97,11 +108,16 @@ def test_preview_renders_recorded_positions_without_input_and_releases_hotkeys(
     app.hotkeys = HotkeySettings()
     app._hotkey_lock = Lock()
     app._pressed_keys = set()
-    app.events = Mock()
+    app.events = Queue()
+    app.loop_forever = Mock(get=Mock(return_value=False))
+    app._repetition_count = Mock(return_value=1)
+    app.target_window = None
+    app.start_button = Mock()
+    app.status_text = Mock()
     monkeypatch.setattr(keyboard, "Key", Enum("Key", {f"f{i}": i for i in range(1, 13)}))
     controllers = [Mock(), Mock(), Mock(), Mock()]
     for name, controller in zip(
-            ("mouse.Controller", "keyboard.Controller", "Player", "WindowPlayback"),
+            ("mouse.Controller", "keyboard.Controller", "Player", "PlaybackPreparation"),
             controllers, strict=True):
         monkeypatch.setattr(f"clickcue.gui.{name}", controller)
     dialog, canvas, table = Mock(), Mock(), Mock()
@@ -121,6 +137,7 @@ def test_preview_renders_recorded_positions_without_input_and_releases_hotkeys(
             app._on_key(key)
             app._on_key_release(key)
         dialog.bind.call_args.args[1](None)  # Escape
+        app.events.put(("hotkey_toggle",))  # pending at modal dismissal
 
     dialog.wait_window.side_effect = dismiss
     app._preview_sequence()
@@ -149,16 +166,18 @@ def test_preview_renders_recorded_positions_without_input_and_releases_hotkeys(
     dialog.destroy.assert_called_once()
     assert app.steps == original
     assert not app.dirty
-    app.events.put.assert_not_called()
+    app._poll_events()
+    assert app.events.empty()
     for controller in controllers:
         controller.assert_not_called()
     # Closing returns hotkeys to their normal event path.
     app._on_key(keyboard.Key.f6)
-    app.events.put.assert_called_once_with(("hotkey_toggle",))
+    assert app.events.get_nowait() == ("hotkey_toggle",)
 
 
 def test_preview_unrenderable_coordinates_destroy_dialog_before_releasing_guard(monkeypatch):
     app = editor([])
+    app.events = Queue()
     app.steps = [Step("Origin", 0, 0, 0), Step("Large", 10**400, 0, 0)]
     original = [replace(step) for step in app.steps]
     app._toggle_playback = Mock()
@@ -175,6 +194,7 @@ def test_preview_unrenderable_coordinates_destroy_dialog_before_releasing_guard(
         assert app._preview_active
         app._handle_event(("hotkey_toggle",))
         app._toggle_playback.assert_not_called()
+        app.events.put(("hotkey_toggle",))
 
     dialog.destroy.side_effect = destroyed
     error = Mock(side_effect=report_error)
@@ -187,7 +207,9 @@ def test_preview_unrenderable_coordinates_destroy_dialog_before_releasing_guard(
     assert "Edit" in error.call_args.args[1]
     assert app.steps == original
     assert not app.dirty
+    app._poll_events()
     assert not app._preview_active
+    app._toggle_playback.assert_not_called()
     app._handle_event(("hotkey_toggle",))
     app._toggle_playback.assert_called_once()
 
@@ -316,17 +338,19 @@ def test_unchanged_dialog_and_boundary_move_keep_redo_and_clean_state(monkeypatc
     assert [s.name for s in app.steps] == list("AABCDE")
 
 
-@pytest.mark.parametrize("capturing", [False, True])
-def test_history_cannot_change_sequence_during_playback_or_capture(capturing):
+@pytest.mark.parametrize("busy", ["playing", "capturing", "preparing"])
+def test_history_cannot_change_sequence_while_busy(busy):
     app = editor([1])
     app._remove_step()
     edited = app.steps[:]
-    app.capture_armed = capturing
-    app.player = None if capturing else Mock()
+    app.capture_armed = busy == "capturing"
+    app.player = Mock() if busy == "playing" else None
+    app._preparation = Mock() if busy == "preparing" else None
     app._undo()
     assert app.steps == edited
     app.capture_armed = False
     app.player = None
+    app._preparation = None
     app._undo()
     assert [s.name for s in app.steps] == list("ABCDE")
 

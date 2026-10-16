@@ -20,8 +20,7 @@ def windows(monkeypatch):
 
 
 @pytest.fixture
-def preparation(windows, monkeypatch):
-    monkeypatch.setattr("clickcue.preparation.time.sleep", Mock())
+def preparation(windows):
     return windows
 
 
@@ -109,8 +108,7 @@ def test_preparation_does_not_warn_without_a_covering_window(preparation, top):
     ([None] * 3, "no window detected", 2),
 ])
 def test_guard_recovers_focus_or_reports_cover_including_own_window(
-        windows, monkeypatch, tops, covering, retries):
-    monkeypatch.setattr("clickcue.preparation.time.sleep", Mock())
+        windows, tops, covering, retries):
     selected = TargetWindow("Target", native_id=1, pid=101)
     windows["find_window"].return_value = selected
     windows["window_info_at"].return_value = selected
@@ -149,7 +147,6 @@ def test_player_stop_interrupts_focus_retry_without_click_or_block(windows, monk
         if attempts == retry:
             ready.set()
 
-    monkeypatch.setattr("clickcue.preparation.time.sleep", Mock())
     windows["find_window"].return_value = TargetWindow("Target", native_id=1, pid=101)
     playback = WindowPlayback(TargetWindow("Target"))
     playback.prepare([Step("Click", 17, 29, 0)])
@@ -170,3 +167,34 @@ def test_player_stop_interrupts_focus_retry_without_click_or_block(windows, monk
     finally:
         player.stop()
         player.join(timeout=2)
+
+
+def test_stop_interrupts_preparation_settle_wait_before_coverage_check(windows):
+    settling = threading.Event()
+
+    class SettleEvent(threading.Event):
+        def wait(self, timeout=None):
+            settling.set()
+            return super().wait(timeout)
+
+    playback = WindowPlayback(TargetWindow("Target"))
+    playback.cancelled = SettleEvent()
+    windows["find_window"].return_value = TargetWindow("Target")
+    events = queue.Queue()
+
+    def prepare():
+        try:
+            playback.prepare([Step("Click", 17, 29, 0)])
+        except InterruptedError:
+            events.put("cancelled")
+
+    worker = threading.Thread(target=prepare)
+    worker.start()
+    try:
+        assert settling.wait(2)
+        playback.cancelled.set()
+        assert events.get(timeout=0.2) == "cancelled"
+        windows["window_info_at"].assert_not_called()
+    finally:
+        playback.cancelled.set()
+        worker.join(timeout=2)

@@ -24,7 +24,6 @@ def test_guard_rejects_another_window_of_the_selected_app(monkeypatch):
     other.native_id, other.pid = 12, 101
     monkeypatch.setattr(platform, "list_windows", lambda: [other, selected])
     monkeypatch.setattr("clickcue.preparation.find_window", platform.find_window)
-    monkeypatch.setattr("clickcue.preparation.time.sleep", lambda _: None)
     focus = Mock()
     move = Mock(return_value=False)
     monkeypatch.setattr("clickcue.preparation.focus_window", focus)
@@ -203,7 +202,6 @@ def test_windows_coverage_requires_rectangle_and_native_receiver_agreement(monke
     monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: api, raising=False)
     monkeypatch.setattr(sys, "platform", "win32")
     assert [window.native_id for window in platform.list_windows()] == [target, underneath]
-    monkeypatch.setattr("clickcue.preparation.time.sleep", Mock())
     monkeypatch.setattr("clickcue.preparation.focus_window", Mock())
     playback = WindowPlayback(TargetWindow("Editor"))
     step = Step("Click", 0, 0, 0)  # target rectangle, outside the small overlay

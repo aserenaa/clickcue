@@ -17,7 +17,7 @@ from .models import Step, TargetWindow
 from .platform_support import (accessibility_trusted, configure_dpi_awareness,
                                find_window, list_windows, window_info_at)
 from .playback import Player
-from .preparation import WindowPlayback
+from .preparation import PlaybackPreparation
 from .preview import show_preview
 from .profiles import Profile, ProfileStore, read_profile, write_profile
 
@@ -148,6 +148,9 @@ class ClickCueApp:
         self._redo_history: list[SequenceSnapshot] = []
         self.store = ProfileStore()
         self.player: Player | None = None
+        self._preparation: PlaybackPreparation | None = None
+        self._closed = False
+        self._closing = False
         self.capture_armed = False
         self._preview_active = False
         self.current_profile: str | None = None
@@ -342,7 +345,7 @@ class ClickCueApp:
     # ------------------------------------------------------- background events
 
     def _apply_hotkeys(self) -> None:
-        if self.player is not None or self.capture_armed:
+        if self.player is not None or self.capture_armed or self._preparation is not None:
             messagebox.showinfo("Hotkeys", "Stop playback and finish capture before "
                                 "changing hotkeys.", parent=self.root)
             return
@@ -381,19 +384,38 @@ class ClickCueApp:
             self._pressed_keys.discard(key)
 
     def _poll_events(self) -> None:
+        if self._closed:
+            return
+        # Dialogs run a nested Tk loop. Keep polling there so a queued Stop
+        # cancels the active preparation before its completion handler returns.
+        self.root.after(EVENT_POLL_MS, self._poll_events)
         try:
             for _ in range(MAX_EVENTS_PER_POLL):
                 self._handle_event(self.events.get_nowait())
         except queue.Empty:
             pass
-        self.root.after(EVENT_POLL_MS, self._poll_events)
 
     def _handle_event(self, event: tuple) -> None:
         kind = event[0]
         if (getattr(self, "_preview_active", False)
                 and kind in ("hotkey_toggle", "hotkey_capture")):
             return
-        if kind == "hotkey_toggle":
+        if kind == "prepared":
+            self._finish_preparation(event[1])
+        elif kind == "preview_closed":
+            self._preview_active = False
+        elif kind == "close_cancelled":
+            self._closing = False
+        elif kind == "preparation_stopped":
+            _, preparation, status = event
+            if self._closed or preparation is not self._preparation:
+                return
+            self._preparation = None
+            self.start_button.configure(
+                text=f"▶ Start ({self.hotkeys.toggle})", state="normal")
+            self.status_text.set(
+                "Stopped" if preparation.windows.cancelled.is_set() else status)
+        elif kind == "hotkey_toggle":
             self._toggle_playback()
         elif kind == "hotkey_capture":
             if self.capture_armed:
@@ -474,7 +496,10 @@ class ClickCueApp:
     # ------------------------------------------------------------- playback
 
     def _preview_sequence(self) -> None:
-        if self.player is not None or self.capture_armed:
+        if self._closed or self._closing:
+            return
+        if (self.player is not None or self.capture_armed
+                or self._preparation is not None or self._preview_active):
             messagebox.showinfo("Preview only", "Stop playback and finish capture "
                                 "before previewing.", parent=self.root)
             return
@@ -492,30 +517,65 @@ class ClickCueApp:
                 "display. Edit the click coordinates and try previewing again. "
                 "No input was sent.", parent=self.root)
         finally:
-            self._preview_active = False
+            # Retain the guard until pending modal hotkeys have been consumed.
+            self.events.put(("preview_closed",))
 
     def _toggle_playback(self) -> None:
+        if self._closed:
+            return
+        if self._preparation is not None:
+            self._preparation.windows.cancelled.set()
+            self.start_button.configure(text="Cancelling…", state="disabled")
+            self.status_text.set("Cancelling preparation…")
+            return
         if self.player is not None:
             self.player.stop()
+            return
+        if self._closing or self._preview_active:
             return
         if not self.steps:
             messagebox.showinfo("No steps",
                                 "Add at least one step to the sequence.")
             return
-        windows = WindowPlayback(self.target_window)
-        prepared = windows.prepare(self.steps)
-        if prepared.missing_target:
+        self._preparation = PlaybackPreparation(
+            self.steps, self.target_window, self.loop_forever.get(),
+            self._repetition_count(), self.events)
+        self.start_button.configure(text=f"■ Stop ({self.hotkeys.toggle})")
+        self.status_text.set("Preparing…")
+        self._preparation.start()
+
+    def _finish_preparation(self, preparation: PlaybackPreparation) -> None:
+        if self._closed or preparation is not self._preparation:
+            return
+        windows = preparation.windows
+        prepared = preparation.result
+        accepted = not windows.cancelled.is_set()
+        if accepted and preparation.error is not None:
+            accepted = False
+            messagebox.showerror("Preparation failed", str(preparation.error))
+        if accepted and prepared is not None and prepared.missing_target:
+            accepted = False
             self.status_text.set(prepared.status)
             messagebox.showwarning(
                 "Target window unavailable",
-                f"“{self.target_window.app}” is missing or matches multiple windows.\n\n"
+                f"“{windows.anchor.app}” is missing or matches multiple windows.\n\n"
                 "Open the target app and try again, use Target window → "
                 "Choose… to reselect it, or Clear the target to play with "
                 "saved absolute coordinates.")
+        # Dialogs run a nested Tk loop; Stop or Close may have occurred there.
+        if self._closed or preparation is not self._preparation:
             return
+        if not accepted or windows.cancelled.is_set() or prepared is None:
+            status = (prepared.status if prepared is not None and prepared.missing_target
+                      else "Stopped")
+            # Keep the run active until hotkeys queued during the dialog have
+            # been consumed, including Stop queued just before dismissal.
+            self.events.put(("preparation_stopped", preparation, status))
+            return
+        self._preparation = None
         self._blocked_status = None
-        self.player = Player(prepared.steps, self.loop_forever.get(),
-                             self._repetition_count(), self.events,
+        self.player = Player(prepared.steps, preparation.loop_forever,
+                             preparation.repetitions, self.events,
                              guard=windows.guard)
         self.player.start()
         self.start_button.configure(text=f"■ Stop ({self.hotkeys.toggle})")
@@ -553,7 +613,8 @@ class ClickCueApp:
 
     def _restore_history(self, source: list[SequenceSnapshot],
                          destination: list[SequenceSnapshot]) -> None:
-        if not source or self.player is not None or self.capture_armed:
+        if (not source or self.player is not None or self.capture_armed
+                or self._preparation is not None):
             return
         destination.append(self._sequence_snapshot())
         steps, selection = source.pop()
@@ -895,8 +956,22 @@ class ClickCueApp:
     # ------------------------------------------------------------------ close
 
     def _on_close(self) -> None:
-        if self.dirty and not self._confirm_discard():
+        if self._closed or self._closing:
             return
+        self._closing = True
+        # Confirmation runs a nested Tk loop that can deliver worker completion.
+        if self._preparation is not None:
+            self._preparation.windows.cancelled.set()
+        if self.dirty and not self._confirm_discard():
+            # Consume modal hotkeys before allowing a new Start, including a
+            # toggle queued immediately before the confirmation was dismissed.
+            self.events.put(("close_cancelled",))
+            return
+        self._closed = True
+        self._closing = False
+        if self._preparation is not None:
+            self._preparation.windows.cancelled.set()
+            self._preparation = None
         if self.player is not None:
             self.player.stop()
         if self.keyboard_listener is not None:
