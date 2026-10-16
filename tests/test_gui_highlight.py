@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from clickcue.gui import ClickCueApp
+from clickcue.hotkeys import HotkeySettings
 from clickcue.models import Step
 
 
@@ -10,6 +11,7 @@ from clickcue.models import Step
 def app(monkeypatch):
     monkeypatch.setattr("clickcue.gui.mouse.Controller", Mock())
     app = ClickCueApp.__new__(ClickCueApp)
+    app.hotkeys = HotkeySettings()
     app.tree = Mock()
     app.tree.get_children.return_value = ("first", "second")
     app.loop_forever = Mock()
