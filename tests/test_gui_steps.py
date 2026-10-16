@@ -1,9 +1,13 @@
 from dataclasses import replace
+from enum import Enum
+from threading import Lock
 from unittest.mock import Mock
 
 import pytest
+from pynput import keyboard
 
 from clickcue.gui import ClickCueApp
+from clickcue.hotkeys import HotkeySettings
 from clickcue.models import Step
 
 
@@ -59,6 +63,133 @@ def editor(selection):
     app.tree.selection_set([app.tree.get_children()[index]
                             for index in reversed(selection)])
     return app
+
+
+def test_preview_requires_clicks_and_stopped_capture_or_playback(monkeypatch):
+    app = editor([])
+    notice = Mock()
+    monkeypatch.setattr("clickcue.gui.messagebox.showinfo", notice)
+    for steps, player, capturing, hint in [
+        ([], None, False, "Add"),
+        ([Step("Pause", 100, 200, 1, True)], None, False, "wait"),
+        ([Step("Click", 1, 2, 0)], Mock(), False, "Stop"),
+        ([Step("Click", 1, 2, 0)], None, True, "capture"),
+    ]:
+        app.steps, app.player, app.capture_armed = steps, player, capturing
+        notice.reset_mock()
+        app._preview_sequence()
+        notice.assert_called_once()
+        assert hint in notice.call_args.args[1]
+
+
+@pytest.mark.parametrize("coordinates", [
+    [(-100, -100), (100, 0)],
+    [(-200, -200), (-100, -100)],
+    [(17, 29), (17, 29)],
+])
+def test_preview_renders_recorded_positions_without_input_and_releases_hotkeys(
+        monkeypatch, coordinates):
+    app = editor([])
+    app.steps = [Step("First", *coordinates[0], 0),
+                 Step("Pause", 9999, 9999, 2, True),
+                 Step("Last", *coordinates[1], 1)]
+    original = [replace(step) for step in app.steps]
+    app.hotkeys = HotkeySettings()
+    app._hotkey_lock = Lock()
+    app._pressed_keys = set()
+    app.events = Mock()
+    monkeypatch.setattr(keyboard, "Key", Enum("Key", {f"f{i}": i for i in range(1, 13)}))
+    controllers = [Mock(), Mock(), Mock(), Mock()]
+    for name, controller in zip(
+            ("mouse.Controller", "keyboard.Controller", "Player", "WindowPlayback"),
+            controllers, strict=True):
+        monkeypatch.setattr(f"clickcue.gui.{name}", controller)
+    dialog, canvas, table = Mock(), Mock(), Mock()
+    monkeypatch.setattr("clickcue.preview.tk.Toplevel", Mock(return_value=dialog))
+    canvas_widget = Mock(return_value=canvas)
+    monkeypatch.setattr("clickcue.preview.tk.Canvas", canvas_widget)
+    monkeypatch.setattr("clickcue.preview.ttk.Treeview", Mock(return_value=table))
+    for widget in ("Frame", "Label", "Scrollbar", "Button"):
+        monkeypatch.setattr(f"clickcue.preview.ttk.{widget}", Mock())
+
+    def dismiss():
+        # Both queued events and fresh listener callbacks must be inert. Fresh
+        # callbacks must not leave a start event to fire after the dialog closes.
+        for event in (("hotkey_toggle",), ("hotkey_capture", 50, 60)):
+            app._handle_event(event)
+        for key in (keyboard.Key.f6, keyboard.Key.f8):
+            app._on_key(key)
+            app._on_key_release(key)
+        dialog.bind.call_args.args[1](None)  # Escape
+
+    dialog.wait_window.side_effect = dismiss
+    app._preview_sequence()
+
+    viewport = canvas_widget.call_args.kwargs
+    centres = []
+    for marker in canvas.create_oval.call_args_list:
+        x1, y1, x2, y2 = marker.args
+        assert 0 <= x1 < x2 <= viewport["width"]
+        assert 0 <= y1 < y2 <= viewport["height"]
+        centres.append(((x1 + x2) / 2, (y1 + y2) / 2))
+    if coordinates[0] != coordinates[1]:
+        dx = centres[1][0] - centres[0][0]
+        dy = centres[1][1] - centres[0][1]
+        assert dx > 0 and dy > 0
+        assert dx / dy == pytest.approx(
+            (coordinates[1][0] - coordinates[0][0]) /
+            (coordinates[1][1] - coordinates[0][1]))
+    labels = [call.kwargs["text"] for call in canvas.create_text.call_args_list]
+    assert labels == (["1, 3"] if coordinates[0] == coordinates[1] else ["1", "3"])
+    assert [call.kwargs["values"] for call in table.insert.call_args_list] == [
+        (1, "First", str(coordinates[0]), 0),
+        (2, "Pause", "Wait only — no click", 2),
+        (3, "Last", str(coordinates[1]), 1),
+    ]
+    dialog.destroy.assert_called_once()
+    assert app.steps == original
+    assert not app.dirty
+    app.events.put.assert_not_called()
+    for controller in controllers:
+        controller.assert_not_called()
+    # Closing returns hotkeys to their normal event path.
+    app._on_key(keyboard.Key.f6)
+    app.events.put.assert_called_once_with(("hotkey_toggle",))
+
+
+def test_preview_unrenderable_coordinates_destroy_dialog_before_releasing_guard(monkeypatch):
+    app = editor([])
+    app.steps = [Step("Origin", 0, 0, 0), Step("Large", 10**400, 0, 0)]
+    original = [replace(step) for step in app.steps]
+    app._toggle_playback = Mock()
+    dialog = Mock()
+    monkeypatch.setattr("clickcue.preview.tk.Toplevel", Mock(return_value=dialog))
+    for widget in ("Frame", "Label"):
+        monkeypatch.setattr(f"clickcue.preview.ttk.{widget}", Mock())
+
+    def destroyed():
+        assert app._preview_active
+
+    def report_error(*args, **kwargs):
+        dialog.destroy.assert_called_once()
+        assert app._preview_active
+        app._handle_event(("hotkey_toggle",))
+        app._toggle_playback.assert_not_called()
+
+    dialog.destroy.side_effect = destroyed
+    error = Mock(side_effect=report_error)
+    monkeypatch.setattr("clickcue.gui.messagebox.showerror", error)
+
+    app._preview_sequence()
+
+    error.assert_called_once()
+    assert "coordinates" in error.call_args.args[1]
+    assert "Edit" in error.call_args.args[1]
+    assert app.steps == original
+    assert not app.dirty
+    assert not app._preview_active
+    app._handle_event(("hotkey_toggle",))
+    app._toggle_playback.assert_called_once()
 
 
 def assert_rows_match_steps(app):
