@@ -36,6 +36,9 @@ def app(monkeypatch):
     app.root = Mock()
     app.root.tk.call.return_value = ""
     app._editing_controls = []
+    app.run_selected_button = Mock()
+    app.pause_button = Mock()
+    app._run_indices = None
     app.capture_armed = False
     app.repetitions = Mock(get=Mock(return_value="1"))
     app.root.after.side_effect = ui_only

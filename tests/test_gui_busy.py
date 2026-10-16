@@ -61,7 +61,7 @@ def button(app, prefix):
                 if w.winfo_class() == "TButton" and str(w.cget("text")).startswith(prefix))
 
 
-@pytest.mark.parametrize("phase", ["preparing", "playing"])
+@pytest.mark.parametrize("phase", ["preparing", "playing", "paused"])
 def test_busy_callbacks_preserve_editor_and_profile_files(editor, monkeypatch, tmp_path, phase):
     app = editor
     app._copy_step()
@@ -69,9 +69,13 @@ def test_busy_callbacks_preserve_editor_and_profile_files(editor, monkeypatch, t
     app._undo()  # Both history directions have an actual mutation to restore.
     app.capture_armed = True  # Starting must disarm any outstanding capture.
     app._toggle_playback()
-    if phase == "playing":
+    if phase != "preparing":
         app._preparation.result = PreparationResult(app.steps[:], "Playing")
         app._finish_preparation(app._preparation)
+        app.player.paused = False
+        if phase == "paused":
+            app._toggle_pause()
+            app.player.pause.assert_called_once()
     before = deepcopy(app.steps)
     files = {p.name: p.read_bytes() for p in app.store.directory.iterdir()}
     changed = Step("Changed", 40, 50, 0)
@@ -122,7 +126,7 @@ def test_busy_callbacks_preserve_editor_and_profile_files(editor, monkeypatch, t
     assert {p.name: p.read_bytes() for p in app.store.directory.iterdir()} == files
 
 
-@pytest.mark.parametrize("outcome", ["stop", "error", "missing", "finished", "play_stop", "play_error", "cancel_close"])
+@pytest.mark.parametrize("outcome", ["stop", "error", "missing", "finished", "play_stop", "play_error", "pause_stop", "cancel_close"])
 def test_controls_stay_locked_until_completion_and_restore(editor, outcome):
     app = editor
     controls = [button(app, prefix) for prefix in
@@ -134,14 +138,28 @@ def test_controls_stay_locked_until_completion_and_restore(editor, outcome):
     preparation = app._preparation
     assert all(w.instate(["disabled"]) for w in controls)
     assert app.start_button.instate(["!disabled"])
+    assert app.pause_button.instate(["disabled"])
+    assert app.run_selected_button.instate(["disabled"])
     assert button(app, "Export").instate(["!disabled"])
-    if outcome in ("finished", "play_stop", "play_error"):
+    if outcome in ("finished", "play_stop", "play_error", "pause_stop"):
         preparation.result = PreparationResult(app.steps[:], "Playing")
         app._handle_event(("prepared", preparation))
         assert all(w.instate(["disabled"]) for w in controls)
+        assert app.pause_button.instate(["!disabled"])
+        if outcome == "pause_stop":
+            app.player.paused = False
+            app._toggle_pause()
+            app.player.pause.assert_called_once()
+            assert app.pause_button.cget("text") == "Resume"
+            app.player.paused = True
+            app._handle_event(("waiting", 1, 0, "First", 1.0))
+            assert app.status_text.get().startswith("Paused")
+            app._toggle_pause()
+            app.player.resume.assert_called_once()
+            assert app.pause_button.cget("text") == "Pause"
         if outcome == "play_error":
             app._handle_event(("error", "synthetic failure"))
-        if outcome == "play_stop":
+        if outcome in ("play_stop", "pause_stop"):
             app._toggle_playback()
             app.player.stop.assert_called_once()
         assert all(w.instate(["disabled"]) for w in controls)
@@ -164,6 +182,9 @@ def test_controls_stay_locked_until_completion_and_restore(editor, outcome):
         app._poll_events()
     assert all(w.instate(["!disabled"]) for w in controls)
     assert app.profile_combo.instate(["readonly"])
+    assert app.pause_button.instate(["disabled"])
+    assert app.pause_button.cget("text") == "Pause"
+    assert app.run_selected_button.instate(["!disabled"])
     app.tree.selection_set(app.tree.get_children()[0])
     app._copy_step()
     assert len(app.steps) == 3
@@ -218,3 +239,47 @@ def test_modal_grab_blocks_start_but_not_active_stop(editor):
         assert preparation.windows.cancelled.is_set()
     finally:
         dialog.destroy()
+
+
+@pytest.mark.parametrize("loop_forever", [False, True])
+def test_selected_run_snapshots_order_settings_and_original_progress_rows(editor, loop_forever):
+    app = editor
+    app.steps.insert(1, Step("Skip", 9, 9, 0))
+    app._refresh_table()
+    rows = app.tree.get_children()
+    app.tree.selection_set(rows[2], rows[0])
+    app.loop_forever.set(loop_forever)
+    app.repetitions.set("3")
+    before = app._sequence_snapshot()
+    history = (deepcopy(app._undo_history), deepcopy(app._redo_history))
+    app.run_selected_button.invoke()
+    preparation = app._preparation
+    assert preparation.steps == [before[0][0], before[0][2]]
+    assert preparation.loop_forever is loop_forever
+    assert preparation.repetitions == 3
+    assert preparation.windows.anchor == app.target_window
+    app.tree.selection_set(rows[1])  # Selection changes cannot change this run.
+    preparation.result = PreparationResult(preparation.steps, "Playing selected")
+    app._handle_event(("prepared", preparation))
+    from clickcue.gui import Player
+    assert Player.call_args.args[:3] == (preparation.steps, loop_forever, 3)
+    assert Player.call_args.kwargs["guard"].__self__ is preparation.windows
+    app.player.paused = False
+    for repetition, index, row in ((1, 0, rows[0]), (1, 1, rows[2]), (2, 0, rows[0])):
+        app._handle_event(("playing", repetition, index, "Selected"))
+        assert app.tree.selection() == (row,)
+        assert app.tree.focus() == row
+        assert f"step {app.tree.index(row) + 1}:" in app.status_text.get()
+    app._handle_event(("stopped",))
+    assert app.steps == before[0]
+    assert (app._undo_history, app._redo_history) == history
+
+
+def test_run_selected_without_selection_explains_how_to_start(editor):
+    app = editor
+    app.tree.selection_remove(*app.tree.get_children())
+    app.run_selected_button.invoke()
+    assert app._preparation is None
+    from clickcue.gui import messagebox
+    messagebox.showinfo.assert_called_once()
+    assert "Select one or more steps" in messagebox.showinfo.call_args.args[1]

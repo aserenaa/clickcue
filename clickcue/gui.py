@@ -150,6 +150,7 @@ class ClickCueApp:
         self.store = ProfileStore()
         self.player: Player | None = None
         self._preparation: PlaybackPreparation | None = None
+        self._run_indices: list[int] | None = None
         self._closed = False
         self._closing = False
         self.capture_armed = False
@@ -306,6 +307,15 @@ class ClickCueApp:
         ttk.Label(control_bar, textvariable=self.status_text).pack(
             side="left", padx=(12, 0))
 
+        selected_bar = ttk.Frame(main)
+        selected_bar.pack(fill="x", pady=(10, 0))
+        self.run_selected_button = ttk.Button(
+            selected_bar, text="Run selected steps", command=self._run_selected)
+        self.run_selected_button.pack(side="left")
+        self.pause_button = ttk.Button(
+            selected_bar, text="Pause", command=self._toggle_pause, state="disabled")
+        self.pause_button.pack(side="left", padx=(6, 0))
+
         hotkey_bar = ttk.LabelFrame(main, text="Global hotkeys (this machine)", padding=8)
         hotkey_bar.pack(fill="x", pady=(10, 0))
         self.toggle_key = tk.StringVar(value=self.hotkeys.toggle)
@@ -336,6 +346,10 @@ class ClickCueApp:
 
     def _update_editing_controls(self) -> None:
         state = "disabled" if self._editing_blocked() else "!disabled"
+        self.run_selected_button.state([state])
+        self.pause_button.state(["!disabled" if self.player is not None else "disabled"])
+        if self.player is None:
+            self.pause_button.configure(text="Pause")
         for widget in self._editing_controls:
             # Toggle only disabled, preserving readonly combobox state.
             widget.state([state])
@@ -472,6 +486,7 @@ class ClickCueApp:
             if self._closed or preparation is not self._preparation:
                 return
             self._preparation = None
+            self._run_indices = None
             self._run_settings = None
             self._update_editing_controls()
             self.start_button.configure(
@@ -486,7 +501,11 @@ class ClickCueApp:
                 self._refresh_target_bounds()
                 self._add_step(prefill=Step("New step", event[1], event[2], 1.0))
         elif kind in ("waiting", "playing"):
+            if self.player is not None and self.player.paused:
+                return
             _, repetition, index, name = event[:4]
+            if self._run_indices is not None:
+                index = self._run_indices[index]
             total = "∞" if self.loop_forever.get() else self.repetitions.get()
             countdown = f" — waiting {event[4]:.1f}s" if kind == "waiting" else ""
             self.status_text.set(
@@ -495,6 +514,7 @@ class ClickCueApp:
             self._highlight_step(index)
         elif kind == "stopped":
             self.player = None
+            self._run_indices = None
             self._run_settings = None
             self._update_editing_controls()
             self.start_button.configure(text=f"▶ Start ({self.hotkeys.toggle})")
@@ -604,17 +624,45 @@ class ClickCueApp:
         if self.player is not None:
             self.player.stop()
             return
+        self._start_playback()
+
+    def _run_selected(self) -> None:
+        if not self._editing_blocked():
+            self._start_playback(selected_only=True)
+
+    def _toggle_pause(self) -> None:
+        if self._closed or self._closing or self.player is None:
+            return
+        if self.player.paused:
+            self.player.resume()
+            self.pause_button.configure(text="Pause")
+            self.status_text.set("Resuming…")
+        else:
+            self.player.pause()
+            self.pause_button.configure(text="Resume")
+            self.status_text.set("Paused — Resume to continue or Stop to cancel")
+
+    def _start_playback(self, selected_only: bool = False) -> None:
         if (self._closing or self._preview_active
                 or self.root.tk.call("grab", "current", self.root)):
             return
+        indices = list(range(len(self.steps)))
+        if selected_only:
+            selected = set(self.tree.selection())
+            indices = [i for i, row in enumerate(self.tree.get_children()) if row in selected]
+            if not indices:
+                messagebox.showinfo("No selected steps", "Select one or more steps in the "
+                                    "list, then choose Run selected steps.", parent=self.root)
+                return
         if not self.steps:
             messagebox.showinfo("No steps",
                                 "Add at least one step to the sequence.")
             return
         self.capture_armed = False
+        self._run_indices = indices
         self._run_settings = (self.loop_forever.get(), self.repetitions.get())
         self._preparation = PlaybackPreparation(
-            self.steps, self.target_window, self.loop_forever.get(),
+            [self.steps[i] for i in indices], self.target_window, self.loop_forever.get(),
             self._repetition_count(), self.events)
         self.start_button.configure(text=f"■ Stop ({self.hotkeys.toggle})")
         self.status_text.set("Preparing…")
@@ -655,6 +703,7 @@ class ClickCueApp:
         self.player = Player(prepared.steps, preparation.loop_forever,
                              preparation.repetitions, self.events,
                              guard=windows.guard)
+        self._update_editing_controls()
         self.player.start()
         self.start_button.configure(text=f"■ Stop ({self.hotkeys.toggle})")
         self.status_text.set(prepared.status)

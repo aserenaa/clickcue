@@ -1,5 +1,6 @@
 import queue
 import threading
+import time
 from unittest.mock import Mock, PropertyMock
 
 import pytest
@@ -202,6 +203,97 @@ def test_wait_only_step_does_not_guard_or_click_and_continues(controller):
         assert ("playing", 1, 1, "Button") in received
         assert not any(event[0] == "blocked" for event in received)
         assert received[-1] == ("stopped",)
+    finally:
+        player.stop()
+        player.join(timeout=2)
+
+
+@pytest.mark.parametrize("finish", ["resume", "stop"])
+def test_pause_freezes_remaining_delay_and_stop_wakes_worker(controller, monkeypatch, finish):
+    monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
+    events = queue.Queue()
+    pressed = threading.Event()
+    controller.press.side_effect = lambda *_: pressed.set()
+    player = Player([Step("Delayed", 1, 2, 0.5)], False, 1, events)
+    player.start()
+    try:
+        assert events.get(timeout=2)[0] == "waiting"
+        player.pause()
+        assert player.paused
+        assert not pressed.wait(0.65)  # Longer than the entire original delay.
+        if finish == "stop":
+            player.stop()
+        else:
+            resumed = time.monotonic()
+            player.resume()
+            assert not player.paused
+            assert pressed.wait(2)
+            assert time.monotonic() - resumed >= 0.3
+        player.join(timeout=1)
+        assert not player.is_alive()
+        assert controller.press.call_count == (finish == "resume")
+        assert list(events.queue)[-1] == ("stopped",)
+    finally:
+        player.stop()
+        player.join(timeout=2)
+
+
+@pytest.mark.parametrize("pause_at", ["guard", "move", "press"])
+def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
+        controller, monkeypatch, pause_at):
+    monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
+    entered = threading.Event()
+    released = threading.Event()
+    next_click = threading.Event()
+    guarded = []
+    pointer = [None]
+    clicked_at = []
+
+    def guard(step, _cancelled):
+        guarded.append(step.name)
+        if pause_at == "guard" and len(guarded) == 1:
+            player.pause()  # Simulate Pause arriving during a native lookup.
+            entered.set()
+            assert _cancelled.wait(0.1)  # Interrupt subsequent native retry waits.
+        return None
+
+    def moved(position):
+        pointer[0] = position
+        if pause_at == "move" and not entered.is_set():
+            player.pause()
+            entered.set()
+
+    def pressed(*_):
+        clicked_at.append(pointer[0])
+        if pause_at == "press" and not entered.is_set():
+            player.pause()
+            entered.set()
+        else:
+            next_click.set()
+
+    type(controller).position = PropertyMock(side_effect=moved)
+    controller.press.side_effect = pressed
+    controller.release.side_effect = lambda *_: released.set()
+    events = queue.Queue()
+    player = Player([Step("First", 1, 2, 0), Step("Second", 3, 4, 0)],
+                    False, 1, events, guard=guard)
+    player.start()
+    try:
+        assert entered.wait(2)
+        if pause_at == "press":
+            assert released.wait(1)  # Pausing must never leave the button held.
+        assert not next_click.wait(0.15)
+        if pause_at == "move":
+            pointer[0] = (999, 999)  # Clicking Resume moved away from the target.
+        player.resume()
+        player.join(timeout=2)
+        assert not player.is_alive()
+        assert controller.press.call_count == 2
+        assert controller.release.call_count == 2
+        assert clicked_at == [(1, 2), (3, 4)]
+        if pause_at == "guard":
+            assert guarded == ["First", "First", "Second"]
+        assert list(events.queue)[-1] == ("stopped",)
     finally:
         player.stop()
         player.join(timeout=2)
