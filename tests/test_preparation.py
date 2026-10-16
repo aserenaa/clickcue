@@ -24,7 +24,7 @@ def preparation(windows):
     return windows
 
 
-@pytest.mark.parametrize("anchor", [None, TargetWindow("Target")])
+@pytest.mark.parametrize("anchor", [None, TargetWindow("Target", native_id=1, pid=101)])
 def test_wait_only_preparation_does_not_touch_windows(preparation, anchor):
     steps = [Step("Pause", 17, 29, 2, wait_only=True)]
     result = WindowPlayback(anchor).prepare(steps)
@@ -60,7 +60,7 @@ def test_anchored_preparation_restores_or_scales_without_changing_saved_steps(
     current = TargetWindow("Target", -200, 100, 200, 100)
     partial = TargetWindow("Target", 10, 20, 200, 400)
     if mode == "legacy":
-        anchor = TargetWindow("Target")
+        anchor = TargetWindow("Target", native_id=1, pid=101)
     if mode == "unchanged":
         current = anchor
     preparation["find_window"].side_effect = [
@@ -85,35 +85,42 @@ def test_anchored_preparation_restores_or_scales_without_changing_saved_steps(
 
 def test_missing_target_reports_unavailable_without_focusing(preparation):
     steps = [Step("Click", 125, 250, 0)]
-    result = WindowPlayback(TargetWindow("Target")).prepare(steps)
+    result = WindowPlayback(TargetWindow("Target", native_id=1, pid=101)).prepare(steps)
     assert result.missing_target
     assert result.steps == steps
-    assert result.status == "Target unavailable — open, reselect, or clear the target"
+    assert result.status == "Target unavailable or ambiguous — open, reselect, or clear the target"
     preparation["focus_window"].assert_not_called()
     preparation["window_info_at"].assert_not_called()
 
 
-@pytest.mark.parametrize("top", [None, TargetWindow("Target")])
+@pytest.mark.parametrize("top", [None, TargetWindow("Target", native_id=1, pid=101)])
 def test_preparation_does_not_warn_without_a_covering_window(preparation, top):
-    preparation["find_window"].return_value = TargetWindow("Target")
+    preparation["find_window"].return_value = TargetWindow("Target", native_id=1, pid=101)
     preparation["window_info_at"].return_value = top
-    result = WindowPlayback(TargetWindow("Target")).prepare([Step("Click", 1, 2, 0)])
+    result = WindowPlayback(TargetWindow("Target", native_id=1, pid=101)).prepare([Step("Click", 1, 2, 0)])
     assert result.status == "Playing on “Target”…"
 
 
 @pytest.mark.parametrize("tops, covering, retries", [
-    ([TargetWindow("Target")], None, 0),
-    ([TargetWindow("Cover"), TargetWindow("Target")], None, 1),
+    ([TargetWindow("Target", native_id=1, pid=101)], None, 0),
+    ([TargetWindow("Cover"), TargetWindow("Target", native_id=1, pid=101)], None, 1),
     ([TargetWindow("Cover")] * 3, "Cover", 2),
     ([None] * 3, "no window detected", 2),
 ])
 def test_guard_recovers_focus_or_reports_cover_including_own_window(
         windows, tops, covering, retries):
+    selected = TargetWindow("Target", native_id=1, pid=101)
+    windows["find_window"].return_value = selected
+    windows["window_info_at"].return_value = selected
+    playback = WindowPlayback(TargetWindow("Target"))
+    playback.prepare([Step("Click", 17, 29, 0)])
+    windows["focus_window"].reset_mock()
+    windows["window_info_at"].reset_mock()
     windows["window_info_at"].side_effect = tops
     cancelled = Mock(spec=threading.Event)
     cancelled.is_set.return_value = False
     cancelled.wait.return_value = False
-    guard = WindowPlayback(TargetWindow("Target")).guard
+    guard = playback.guard
     assert guard(Step("Click", 17, 29, 0), cancelled) == covering
     assert windows["focus_window"].call_count == retries
     for call in windows["window_info_at"].call_args_list:
@@ -140,11 +147,14 @@ def test_player_stop_interrupts_focus_retry_without_click_or_block(windows, monk
         if attempts == retry:
             ready.set()
 
+    windows["find_window"].return_value = TargetWindow("Target", native_id=1, pid=101)
+    playback = WindowPlayback(TargetWindow("Target"))
+    playback.prepare([Step("Click", 17, 29, 0)])
     windows["focus_window"].side_effect = focus
     windows["window_info_at"].return_value = TargetWindow("Cover")
     events = queue.Queue()
     player = Player([Step("Click", 17, 29, 0)], False, 1, events,
-                    guard=WindowPlayback(TargetWindow("Target")).guard)
+                    guard=playback.guard)
     player.start()
     try:
         assert ready.wait(timeout=2)
