@@ -112,6 +112,8 @@ def test_profile_io_error_keeps_editor_state(action, monkeypatch):
 @pytest.fixture
 def transfer_editor(tmp_path, monkeypatch):
     app = ClickCueApp.__new__(ClickCueApp)
+    app._undo_history = []
+    app._redo_history = []
     app.root = Mock()
     app.store = ProfileStore(tmp_path / "local")
     app.current_profile = "Original"
