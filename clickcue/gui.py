@@ -544,9 +544,10 @@ class ClickCueApp:
             self._toggle_playback()
         elif kind == "controlled":
             _, player, action = event
-            if (self._closed or self._closing or player is not self.player
+            if (self._closed or player is not self.player
                     or action != self._pending_control or action == "stop"):
                 return
+            # A cancelled close still needs this ack; _closing keeps controls locked.
             self._pending_control = None
             self._update_editing_controls()
             self.pause_button.configure(text="Resume" if player.paused else "Pause")

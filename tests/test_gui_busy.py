@@ -284,7 +284,7 @@ def test_run_selected_without_selection_explains_how_to_start(editor):
     assert "Select one or more steps" in messagebox.showinfo.call_args.args[1]
 
 
-@pytest.mark.parametrize("finish", ["stop", "close"])
+@pytest.mark.parametrize("finish", ["stop", "close", "cancel_close"])
 def test_native_input_waits_for_control_ack_without_blocking_tk(editor, monkeypatch, finish):
     from clickcue.playback import Player
 
@@ -330,13 +330,55 @@ def test_native_input_waits_for_control_ack_without_blocking_tk(editor, monkeypa
             app._on_close()
             assert app._closed
         else:
+            if finish == "cancel_close":
+                handle = app._handle_event
+                acknowledged = []
+                resumed = tk.BooleanVar(master=app.root)
+
+                def observe(event):
+                    handle(event)
+                    if event[0] == "controlled" and event[1] is player:
+                        if event[2] == "pause" and app._closing:
+                            acknowledged.append(app.pause_button.instate(["disabled"]))
+                            dialog.destroy()
+                        elif event[2] == "resume":
+                            resumed.set(True)
+
+                def decline_close(*args, **kwargs):
+                    nonlocal dialog
+                    dialog = tk.Toplevel(app.root)
+                    dialog.grab_set()
+                    deadline = app.root.after(2000, dialog.destroy)
+                    app.root.after(0, release.set)
+                    app.root.wait_window(dialog)
+                    app.root.after_cancel(deadline)
+                    assert acknowledged == [True]  # Actual ack consumed inside the modal.
+                    return False
+
+                dialog = None
+                monkeypatch.setattr(app, "_handle_event", observe)
+                monkeypatch.setattr("clickcue.gui.messagebox.askyesno", decline_close)
+                app.dirty = True
+                app._on_close()
+                app._poll_events()
+                assert not app._closing
+                assert player.paused
+                assert app._pending_control is None
+                assert app.pause_button.instate(["!disabled"])
+                app._toggle_pause()
+                deadline = app.root.after(2000, resumed.set, False)
+                app.root.wait_variable(resumed)
+                app.root.after_cancel(deadline)
+                assert resumed.get()
+                assert not player.paused
+                assert app.pause_button.cget("text") == "Pause"
             app._toggle_playback()  # Stop supersedes the outstanding Pause.
             assert app.status_text.get() == "Stopping…"
             assert app.run_selected_button.instate(["disabled"])
         release.set()
         player.join(timeout=2)
         assert not player.is_alive()
-        if finish == "stop":
+        if finish in ("stop", "cancel_close"):
             app._poll_events()
             assert app.player is None
             assert app._pending_control is None

@@ -117,29 +117,42 @@ def test_large_font_rows_fit_text_and_window_can_grow(app, request):
     request.addfinalizer(lambda: default_font.configure(**original))
     app.steps = [Step("Readable row", 0, 0, 1)]
     app._refresh_table(select=0)
+    minimum_width, minimum_height = app.root.minsize()
+    app.root.geometry(f"{minimum_width}x{minimum_height}")
     app.root.deiconify()
     app.root.update()
-    # Resize between the minimum and an actual mapped size accepted by the WM.
-    # Do this before the large-font rebuild can change the window constraints.
-    width, expanded_height = app.root.winfo_width(), app.root.winfo_height()
-    minimum_height = app.root.minsize()[1]
-    assert minimum_height < expanded_height
-    table_heights = []
-    for target_height in (minimum_height, expanded_height):
+    width = app.root.winfo_width()
+
+    def resize(target_height, *, growing=False):
         settled = tk.BooleanVar(master=app.root)
 
-        def configured(event, target_height=target_height, settled=settled):
-            if event.widget == app.root and (event.width, event.height) == (width, target_height):
+        def accepted(actual_width, actual_height):
+            return ((actual_width == width and actual_height > minimum_height) if growing
+                    else (actual_width, actual_height) == (width, target_height))
+
+        def configured(event):
+            if event.widget == app.root and accepted(event.width, event.height):
                 settled.set(True)
 
         binding = app.root.bind("<Configure>", configured, add="+")
         deadline = app.root.after(2000, settled.set, True)
         app.root.geometry(f"{width}x{target_height}")
-        if (app.root.winfo_width(), app.root.winfo_height()) != (width, target_height):
+        if not accepted(app.root.winfo_width(), app.root.winfo_height()):
             app.root.wait_variable(settled)
         app.root.after_cancel(deadline)
         app.root.unbind("<Configure>", binding)
         app.root.update_idletasks()
+        return app.root.winfo_width(), app.root.winfo_height()
+
+    # Initial mapping may be exactly the minimum (notably on macOS). Ask for
+    # more space within the WM's maximum, then use its actual accepted size.
+    desired_height = min(minimum_height + app.tree.winfo_reqheight(), app.root.maxsize()[1])
+    assert desired_height > minimum_height
+    width, expanded_height = resize(desired_height, growing=True)
+    assert minimum_height < expanded_height
+    table_heights = []
+    for target_height in (minimum_height, expanded_height):
+        resize(target_height)
         assert (app.root.winfo_width(), app.root.winfo_height()) == (width, target_height)
         row = app.tree.bbox(app.tree.get_children()[0])
         assert row and row[1] + row[3] <= app.tree.winfo_height()
@@ -152,6 +165,8 @@ def test_large_font_rows_fit_text_and_window_can_grow(app, request):
             assert control.winfo_rooty() + control.winfo_height() <= (
                 app.root.winfo_rooty() + app.root.winfo_height())
     assert table_heights[1] > table_heights[0]
+    # The table must absorb the added height, not leave unused space below it.
+    assert table_heights[1] - table_heights[0] == expanded_height - minimum_height
 
     default_font.configure(size=18)
     # Rebuild after choosing a system font size, as at application startup.
