@@ -25,7 +25,10 @@ classifiers = [
 dependencies = ["pynput>=1.7"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.15", "build>=1.2", "twine>=6", "pip-audit>=2.9"]
+dev = [
+    "pytest>=8", "ruff>=0.15", "mypy>=1.15", "types-pynput>=1.8",
+    "build>=1.2", "twine>=6", "pip-audit>=2.9", "setuptools>=77", "wheel>=0.45",
+]
 
 [project.urls]
 Repository = "https://github.com/aserenaa/clickcue"
@@ -41,4 +44,16 @@ include = ["clickcue*"]
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E9", "F"]
+select = ["E9", "F", "B", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Existing source debt; remove these exceptions when the owning modules change.
+"clickcue/gui.py" = ["I001"]
+"clickcue/platform_support.py" = ["I001", "B007"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["clickcue/models.py", "clickcue/profiles.py", "clickcue/playback.py"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
