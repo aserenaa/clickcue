@@ -184,8 +184,10 @@ class ClickCueApp:
 
         profile_bar = ttk.LabelFrame(main, text="Profile", padding=8)
         profile_bar.pack(fill="x")
+        profile_controls = ttk.Frame(profile_bar)
+        profile_controls.pack(fill="x")
         self.profile_combo = ttk.Combobox(
-            profile_bar, textvariable=self.profile_selection,
+            profile_controls, textvariable=self.profile_selection,
             state="readonly", width=24)
         self.profile_combo.pack(side="left")
         self.profile_combo.bind("<<ComboboxSelected>>",
@@ -194,8 +196,10 @@ class ClickCueApp:
                                ("Save", self._save_profile),
                                ("Save As…", self._save_profile_as),
                                ("Delete", self._delete_profile)]:
-            ttk.Button(profile_bar, text=label, command=command).pack(
+            ttk.Button(profile_controls, text=label, command=command).pack(
                 side="left", padx=(6, 0))
+        self.profile_errors_button = ttk.Button(
+            profile_bar, command=self._show_profile_errors)
 
         target_bar = ttk.LabelFrame(main, text="Target window", padding=8)
         target_bar.pack(fill="x", pady=(10, 0))
@@ -599,6 +603,27 @@ class ClickCueApp:
     def _refresh_profile_list(self) -> None:
         self.profile_combo.configure(values=self.store.list_names())
         self.profile_selection.set(self.current_profile or "")
+        if self.store.list_errors:
+            self.profile_errors_button.configure(
+                text=f"Profile errors ({len(self.store.list_errors)})")
+            self.profile_errors_button.pack(anchor="w", pady=(6, 0))
+        else:
+            self.profile_errors_button.pack_forget()
+
+    def _show_profile_errors(self) -> None:
+        self._refresh_profile_list()
+        if not self.store.list_errors:
+            return
+        details = "\n".join(f"{name}: {reason}"
+                            for name, reason in self.store.list_errors.items())
+        messagebox.showwarning(
+            "Profile errors",
+            f"Some files in {self.store.directory} could not be listed:\n\n"
+            f"{details}\n\n"
+            "Files were left unchanged. Check their JSON, filenames and read "
+            "permissions. Correct them, then click Profile errors again to "
+            "refresh the list.",
+            parent=self.root)
 
     def _confirm_discard(self) -> bool:
         if not self.dirty:

@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -59,6 +60,60 @@ def test_list_names_and_delete(tmp_path):
     store.delete("Alpha")
     assert store.list_names() == ["Beta"]
     assert not store.exists("Alpha")
+
+
+@pytest.mark.parametrize(("contents", "reason"), [
+    (b"[]", "profile: must be an object"),
+    (b"null", "profile: must be an object"),
+    (b"\xff", "utf-8"),
+    (b"{", "Expecting"),
+    (b'{"name": 3}', "name"),
+    (b'{"name": "Broken", "steps": [null]}', "steps[1]"),
+    (b'{"name": "Other"}', "Other.json"),
+])
+def test_listing_isolates_invalid_files_without_changing_them(tmp_path, contents, reason):
+    store = ProfileStore(tmp_path)
+    store.save(make_profile("Alpha"))
+    store.save(make_profile("Zulu"))
+    broken = tmp_path / "Broken.json"
+    broken.write_bytes(contents)
+
+    assert store.list_names() == ["Alpha", "Zulu"]
+    assert set(store.list_errors) == {"Broken.json"}
+    assert reason in store.list_errors["Broken.json"]
+    assert store.load("Alpha") == make_profile("Alpha")
+    assert store.load("Zulu") == make_profile("Zulu")
+    assert broken.read_bytes() == contents
+
+
+def test_listing_recovers_from_unreadable_file(tmp_path, monkeypatch):
+    store = ProfileStore(tmp_path)
+    store.save(make_profile("Alpha"))
+    store.save(make_profile("Zulu"))
+    read_text = Path.read_text
+
+    def deny_alpha(path, *args, **kwargs):
+        if path.name == "Alpha.json":
+            raise PermissionError("Access denied")
+        return read_text(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_text", deny_alpha)
+        assert store.list_names() == ["Zulu"]
+        assert "Access denied" in store.list_errors["Alpha.json"]
+
+    assert store.list_names() == ["Alpha", "Zulu"]
+    assert store.list_errors == {}
+
+
+def test_load_rejects_changed_name_even_when_filename_slug_matches(tmp_path):
+    store = ProfileStore(tmp_path)
+    store.save(make_profile("A/B"))
+    assert store.list_names() == ["A/B"]
+    store.save(make_profile("A?B"))
+
+    with pytest.raises(ValueError, match="name"):
+        store.load("A/B")
 
 
 def test_save_overwrites_existing(tmp_path):
