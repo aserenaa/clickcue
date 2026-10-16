@@ -1,5 +1,6 @@
 import queue
-from unittest.mock import Mock
+import threading
+from unittest.mock import Mock, PropertyMock
 
 import pytest
 
@@ -76,6 +77,69 @@ def test_guard_blocks_click_and_stops(controller):
     assert ("stopped",) in received
     assert not player.is_alive()
     controller.press.assert_not_called()
+
+
+def test_stop_inside_successful_guard_prevents_click(controller, monkeypatch):
+    monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
+    events = queue.Queue()
+
+    def guard(_step):
+        player.stop()
+        return None
+
+    player = Player([Step("Button", 10, 20, 0)], loop_forever=False,
+                    repetitions=1, events=events, guard=guard)
+    player.run()
+
+    controller.press.assert_not_called()
+    assert list(events.queue) == [("playing", 1, 0, "Button"), ("stopped",)]
+
+
+@pytest.mark.parametrize("while_pressed", [False, True])
+def test_stop_interrupts_click_waits(controller, monkeypatch, while_pressed):
+    monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
+    monkeypatch.setattr("clickcue.playback.PRESS_HOLD_SECONDS", 2)
+    ready = threading.Event()
+    if while_pressed:
+        controller.press.side_effect = lambda *_: ready.set()
+    else:
+        type(controller).position = PropertyMock(side_effect=lambda *_: ready.set())
+    events = queue.Queue()
+    player = Player([Step("Button", 10, 20, 0)], loop_forever=False,
+                    repetitions=1, events=events)
+    player.start()
+    try:
+        assert ready.wait(timeout=4)
+        player.stop()
+        player.join(timeout=1)
+        assert not player.is_alive()
+        if while_pressed:
+            controller.press.assert_called_once()
+            controller.release.assert_called_once()
+        else:
+            controller.press.assert_not_called()
+        assert list(events.queue)[-1] == ("stopped",)
+    finally:
+        player.stop()
+        player.join(timeout=5)
+
+
+def test_press_error_still_releases_mouse(controller, monkeypatch):
+    monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
+    events = queue.Queue()
+    player = Player([Step("Button", 10, 20, 0)], loop_forever=True,
+                    repetitions=1, events=events)
+
+    controller.press.side_effect = RuntimeError("press failed")
+    player.run()
+
+    controller.press.assert_called_once()
+    controller.release.assert_called_once_with(controller.press.call_args.args[0])
+    received = list(events.queue)
+    assert received[-1] == ("stopped",)
+    assert [event for event in received if event[0] == "error"] == [
+        ("error", "press failed")
+    ]
 
 
 def test_wait_only_step_does_not_guard_or_click_and_continues(controller):
