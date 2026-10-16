@@ -107,14 +107,17 @@ class ProfileStore:
     def __init__(self, directory: Path = DEFAULT_DIR):
         self.directory = directory
         self.directory.mkdir(parents=True, exist_ok=True)
+        self.list_errors: dict[str, str] = {}
 
     def list_names(self) -> list[str]:
+        """List loadable names, recording rejected filenames and reasons."""
         names = []
+        self.list_errors = {}
         for path in sorted(self.directory.glob("*.json")):
             try:
-                names.append(json.loads(path.read_text(encoding="utf-8"))["name"])
-            except (json.JSONDecodeError, KeyError, OSError):
-                continue
+                names.append(self._read_profile(path).name)
+            except (ValueError, OSError) as exc:
+                self.list_errors[path.name] = str(exc)
         return names
 
     def exists(self, name: str) -> bool:
@@ -136,8 +139,19 @@ class ProfileStore:
                 temporary.unlink(missing_ok=True)
 
     def load(self, name: str) -> Profile:
-        data = json.loads(self._path(name).read_text(encoding="utf-8"))
-        return Profile.from_dict(data)
+        profile = self._read_profile(self._path(name))
+        if profile.name != name:
+            raise ValueError(f"name: expected {name!r}, found {profile.name!r}")
+        return profile
+
+    def _read_profile(self, path: Path) -> Profile:
+        profile = Profile.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        expected = self._path(profile.name).name
+        if path.name != expected:
+            raise ValueError(
+                f"name: {profile.name!r} requires filename {expected!r}; "
+                f"found {path.name!r}")
+        return profile
 
     def delete(self, name: str) -> None:
         self._path(name).unlink(missing_ok=True)

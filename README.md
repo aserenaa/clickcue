@@ -176,6 +176,13 @@ Saves replace the profile file only after the new data has been written. If a
 save or delete fails, ClickCue shows an error and keeps your current sequence;
 failed saves leave your edits marked as unsaved so you can retry.
 
+The dropdown includes only valid, readable profiles whose names match their
+filenames (using ClickCue's filename sanitization). If a file cannot be listed,
+**Profile errors** shows its filename and reason, including invalid JSON, invalid
+fields, encoding problems, or read permissions. Files are left unchanged. Correct
+the reported files, then click **Profile errors** again to refresh; valid profiles
+remain available while you repair the others.
+
 <details>
 <summary><strong>Profile format and window anchoring</strong></summary>
 

@@ -4,6 +4,44 @@ import pytest
 
 from clickcue.gui import ClickCueApp
 from clickcue.models import Step, TargetWindow
+from clickcue.profiles import Profile, ProfileStore
+
+
+def test_profile_errors_are_available_on_demand_and_clear_after_repair(tmp_path, monkeypatch):
+    app = ClickCueApp.__new__(ClickCueApp)
+    app.root = Mock()
+    app.store = ProfileStore(tmp_path)
+    app.store.save(Profile("Good"))
+    broken = tmp_path / "Broken.json"
+    broken.write_text('{"name": "Broken", "repetitions": 0}', encoding="utf-8")
+    app.current_profile = "Good"
+    app.profile_combo = Mock()
+    app.profile_selection = Mock()
+    app.profile_errors_button = Mock()
+    warning = Mock()
+    monkeypatch.setattr("clickcue.gui.messagebox.showwarning", warning)
+
+    app._refresh_profile_list()
+    app._refresh_profile_list()
+
+    app.profile_combo.configure.assert_called_with(values=["Good"])
+    app.profile_selection.set.assert_called_with("Good")
+    app.profile_errors_button.pack.assert_called()
+    warning.assert_not_called()
+
+    app._show_profile_errors()
+    message = warning.call_args.args[1]
+    assert str(tmp_path) in message
+    assert "Broken.json" in message
+    assert "repetitions" in message
+    assert "permissions" in message
+    assert "unchanged" in message
+
+    app.store.save(Profile("Broken"))
+    app._show_profile_errors()
+    app.profile_combo.configure.assert_called_with(values=["Broken", "Good"])
+    app.profile_errors_button.pack_forget.assert_called()
+    assert warning.call_count == 1
 
 
 @pytest.mark.parametrize("action", ["save", "save_as", "delete"])
