@@ -170,6 +170,7 @@ class ClickCueApp:
         self.profile_selection = tk.StringVar()
         self.target_text = tk.StringVar()
 
+        self._run_settings: tuple[bool, str] | None = None
         self._build_ui()
         shortcuts = ((("<Command-z>", False), ("<Command-Shift-Z>", True))
                      if sys.platform == "darwin" else
@@ -222,8 +223,10 @@ class ClickCueApp:
         transfer_controls.pack(fill="x", pady=(6, 0))
         for label, command in [("Import…", self._import_profile),
                                ("Export…", self._export_profile)]:
-            ttk.Button(transfer_controls, text=label, command=command).pack(
-                side="left", padx=(0, 6))
+            button = ttk.Button(transfer_controls, text=label, command=command)
+            button.pack(side="left", padx=(0, 6))
+            if command == self._import_profile:
+                self.import_button = button
         self.profile_errors_button = ttk.Button(
             profile_bar, command=self._show_profile_errors)
 
@@ -313,6 +316,24 @@ class ClickCueApp:
                                      foreground="gray")
         self.hotkey_hint.pack(fill="x", pady=(10, 0))
 
+        # Keep read-only export, profile diagnostics, and the control bar usable.
+        editing_bars = (profile_controls, target_bar, step_bar, history_bar,
+                        loop_bar, hotkey_bar)
+        self._editing_controls = [self.import_button] + [
+            widget for bar in editing_bars for widget in bar.winfo_children()
+            if isinstance(widget, (ttk.Button, ttk.Combobox, ttk.Radiobutton,
+                                   ttk.Spinbox))]
+
+    def _editing_blocked(self) -> bool:
+        return (self._closed or self._closing or self.player is not None
+                or self._preparation is not None)
+
+    def _update_editing_controls(self) -> None:
+        state = "disabled" if self._editing_blocked() else "!disabled"
+        for widget in self._editing_controls:
+            # Toggle only disabled, preserving readonly combobox state.
+            widget.state([state])
+
     def _hint_text(self) -> str:
         hotkeys = (f"Global hotkeys: {self.hotkeys.toggle} start/stop, "
                    f"{self.hotkeys.capture} capture cursor position. "
@@ -344,7 +365,7 @@ class ClickCueApp:
     # ------------------------------------------------------- background events
 
     def _apply_hotkeys(self) -> None:
-        if self.player is not None or self.capture_armed or self._preparation is not None:
+        if self._editing_blocked() or self.capture_armed:
             messagebox.showinfo("Hotkeys", "Stop playback and finish capture before "
                                 "changing hotkeys.", parent=self.root)
             return
@@ -405,11 +426,14 @@ class ClickCueApp:
             self._preview_active = False
         elif kind == "close_cancelled":
             self._closing = False
+            self._update_editing_controls()
         elif kind == "preparation_stopped":
             _, preparation, status = event
             if self._closed or preparation is not self._preparation:
                 return
             self._preparation = None
+            self._run_settings = None
+            self._update_editing_controls()
             self.start_button.configure(
                 text=f"▶ Start ({self.hotkeys.toggle})", state="normal")
             self.status_text.set(
@@ -417,7 +441,7 @@ class ClickCueApp:
         elif kind == "hotkey_toggle":
             self._toggle_playback()
         elif kind == "hotkey_capture":
-            if self.capture_armed:
+            if self.capture_armed and not self._editing_blocked():
                 self.capture_armed = False
                 self._refresh_target_bounds()
                 self._add_step(prefill=Step("New step", event[1], event[2], 1.0))
@@ -431,6 +455,8 @@ class ClickCueApp:
             self._highlight_step(index)
         elif kind == "stopped":
             self.player = None
+            self._run_settings = None
+            self._update_editing_controls()
             self.start_button.configure(text=f"▶ Start ({self.hotkeys.toggle})")
             self.status_text.set(self._blocked_status or "Stopped")
             self._blocked_status = None
@@ -466,8 +492,10 @@ class ClickCueApp:
     # -------------------------------------------------------------- target
 
     def _choose_target_window(self) -> None:
+        if self._editing_blocked():
+            return
         dialog = WindowPickerDialog(self.root)
-        if dialog.result:
+        if dialog.result and not self._editing_blocked():
             self.target_window = dialog.result
             self._mark_dirty()
             self._update_target_text()
@@ -476,6 +504,8 @@ class ClickCueApp:
                 "without moving that window")
 
     def _clear_target_window(self) -> None:
+        if self._editing_blocked():
+            return
         if self.target_window is None:
             return
         self.target_window = None
@@ -484,6 +514,8 @@ class ClickCueApp:
 
     def _refresh_target_bounds(self) -> None:
         """Keep stored bounds in sync with the window at capture time."""
+        if self._editing_blocked():
+            return
         if self.target_window is None:
             return
         current = find_window(self.target_window.app)
@@ -530,17 +562,21 @@ class ClickCueApp:
         if self.player is not None:
             self.player.stop()
             return
-        if self._closing or self._preview_active:
+        if (self._closing or self._preview_active
+                or self.root.tk.call("grab", "current", self.root)):
             return
         if not self.steps:
             messagebox.showinfo("No steps",
                                 "Add at least one step to the sequence.")
             return
+        self.capture_armed = False
+        self._run_settings = (self.loop_forever.get(), self.repetitions.get())
         self._preparation = PlaybackPreparation(
             self.steps, self.target_window, self.loop_forever.get(),
             self._repetition_count(), self.events)
         self.start_button.configure(text=f"■ Stop ({self.hotkeys.toggle})")
         self.status_text.set("Preparing…")
+        self._update_editing_controls()
         self._preparation.start()
 
     def _finish_preparation(self, preparation: PlaybackPreparation) -> None:
@@ -612,8 +648,7 @@ class ClickCueApp:
 
     def _restore_history(self, source: list[SequenceSnapshot],
                          destination: list[SequenceSnapshot]) -> None:
-        if (not source or self.player is not None or self.capture_armed
-                or self._preparation is not None):
+        if not source or self._editing_blocked() or self.capture_armed:
             return
         destination.append(self._sequence_snapshot())
         steps, selection = source.pop()
@@ -637,30 +672,39 @@ class ClickCueApp:
         return "break"
 
     def _arm_capture(self) -> None:
+        if self._editing_blocked():
+            return
         self.capture_armed = True
         self.status_text.set("Capture armed: move the cursor to the target "
                              f"point and press {self.hotkeys.capture}")
 
     def _add_step(self, prefill: Step | None = None) -> None:
+        if self._editing_blocked():
+            return
         dialog = StepDialog(self.root, "Add step", prefill)
-        if dialog.result:
+        if dialog.result and not self._editing_blocked():
             before = self._sequence_snapshot()
             self.steps.append(dialog.result)
             self._record_edit(before)
             self._refresh_table()
 
     def _edit_step(self) -> None:
+        if self._editing_blocked():
+            return
         index = self._selected_index()
         if index is None:
             return
         dialog = StepDialog(self.root, "Edit step", self.steps[index])
-        if dialog.result and dialog.result != self.steps[index]:
+        if (not self._editing_blocked() and dialog.result
+                and dialog.result != self.steps[index]):
             before = self._sequence_snapshot()
             self.steps[index] = dialog.result
             self._record_edit(before)
             self._refresh_table(select=index)
 
     def _remove_step(self) -> None:
+        if self._editing_blocked():
+            return
         indices = sorted(self.tree.index(item) for item in self.tree.selection())
         if not indices:
             return
@@ -671,6 +715,8 @@ class ClickCueApp:
         self._refresh_table()
 
     def _copy_step(self) -> None:
+        if self._editing_blocked():
+            return
         indices = sorted(self.tree.index(item) for item in self.tree.selection())
         if not indices:
             return
@@ -685,6 +731,8 @@ class ClickCueApp:
         self.tree.see(children[insert_at])
 
     def _move_step(self, offset: int) -> None:
+        if self._editing_blocked():
+            return
         indices = {self.tree.index(item) for item in self.tree.selection()}
         if not indices:
             return
@@ -744,6 +792,14 @@ class ClickCueApp:
             self._update_title()
 
     def _on_settings_changed(self, *_args) -> None:
+        if self._editing_blocked():
+            if self._run_settings is not None:
+                loop_forever, repetitions = self._run_settings
+                if self.loop_forever.get() != loop_forever:
+                    self.loop_forever.set(loop_forever)
+                if self.repetitions.get() != repetitions:
+                    self.repetitions.set(repetitions)
+            return
         self._mark_dirty()
 
     # -------------------------------------------------------------- profiles
@@ -781,10 +837,13 @@ class ClickCueApp:
             "The current sequence has unsaved changes. Discard them?")
 
     def _open_selected_profile(self) -> None:
+        if self._editing_blocked():
+            self.profile_selection.set(self.current_profile or "")
+            return
         name = self.profile_selection.get()
         if not name or name == self.current_profile:
             return
-        if not self._confirm_discard():
+        if not self._confirm_discard() or self._editing_blocked():
             self.profile_selection.set(self.current_profile or "")
             return
         try:
@@ -811,7 +870,9 @@ class ClickCueApp:
         self.status_text.set(f"Loaded profile “{name}”")
 
     def _new_profile(self) -> None:
-        if not self._confirm_discard():
+        if self._editing_blocked():
+            return
+        if not self._confirm_discard() or self._editing_blocked():
             return
         self._loading = True
         try:
@@ -832,16 +893,20 @@ class ClickCueApp:
         self.status_text.set("New empty sequence")
 
     def _save_profile(self) -> None:
+        if self._editing_blocked():
+            return
         if self.current_profile is None:
             self._save_profile_as()
         else:
             self._write_profile(self.current_profile)
 
     def _save_profile_as(self) -> None:
+        if self._editing_blocked():
+            return
         name = simpledialog.askstring("Save profile", "Profile name:",
                                       parent=self.root,
                                       initialvalue=self.imported_profile_name or "")
-        if not name or not name.strip():
+        if self._editing_blocked() or not name or not name.strip():
             return
         name = name.strip()
         if name != self.current_profile and self.store.exists(name):
@@ -852,6 +917,8 @@ class ClickCueApp:
         self._write_profile(name)
 
     def _write_profile(self, name: str) -> None:
+        if self._editing_blocked():
+            return
         first = next((step for step in self.steps if not step.wait_only), None)
         target_window = self.target_window
         if target_window is None and first is not None:
@@ -881,10 +948,12 @@ class ClickCueApp:
         self.status_text.set(f"Saved profile “{name}”{suffix}")
 
     def _import_profile(self) -> None:
+        if self._editing_blocked():
+            return
         filename = filedialog.askopenfilename(
             parent=self.root, title="Import profile",
             filetypes=[("JSON profiles", "*.json"), ("All files", "*.*")])
-        if not filename:
+        if self._editing_blocked() or not filename:
             return
         try:
             profile = read_profile(Path(filename))
@@ -892,7 +961,7 @@ class ClickCueApp:
             messagebox.showerror("Import failed", f"Could not import profile: {exc}",
                                  parent=self.root)
             return
-        if not self._confirm_discard():
+        if not self._confirm_discard() or self._editing_blocked():
             return
         self._loading = True
         try:
@@ -931,11 +1000,15 @@ class ClickCueApp:
         self.status_text.set(f"Exported profile to {filename}")
 
     def _delete_profile(self) -> None:
+        if self._editing_blocked():
+            return
         name = self.profile_selection.get() or self.current_profile
         if not name:
             return
         if not messagebox.askyesno("Delete profile",
                                    f"Delete profile “{name}”?"):
+            return
+        if self._editing_blocked():
             return
         try:
             self.store.delete(name)
@@ -958,6 +1031,7 @@ class ClickCueApp:
         if self._closed or self._closing:
             return
         self._closing = True
+        self._update_editing_controls()
         # Confirmation runs a nested Tk loop that can deliver worker completion.
         if self._preparation is not None:
             self._preparation.windows.cancelled.set()

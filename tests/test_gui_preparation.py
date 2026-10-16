@@ -34,6 +34,10 @@ def app(monkeypatch):
     app._repetition_count.side_effect = lambda: (ui_only(), app._repetition_count.return_value)[1]
     app.events = queue.Queue()
     app.root = Mock()
+    app.root.tk.call.return_value = ""
+    app._editing_controls = []
+    app.capture_armed = False
+    app.repetitions = Mock(get=Mock(return_value="1"))
     app.root.after.side_effect = ui_only
     app.start_button = Mock()
     app.start_button.configure.side_effect = ui_only

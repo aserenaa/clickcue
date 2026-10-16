@@ -11,6 +11,11 @@ from clickcue.models import Step
 def app(monkeypatch):
     monkeypatch.setattr("clickcue.gui.mouse.Controller", Mock())
     app = ClickCueApp.__new__(ClickCueApp)
+    app.player = None
+    app._preparation = None
+    app._closed = False
+    app._closing = False
+    app._editing_controls = []
     app.hotkeys = HotkeySettings()
     app.tree = Mock()
     app.tree.get_children.return_value = ("first", "second")
