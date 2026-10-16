@@ -22,6 +22,8 @@ TOGGLE_KEY = keyboard.Key.f6
 CAPTURE_KEY = keyboard.Key.f8
 EVENT_POLL_MS = 80
 MAX_EVENTS_PER_POLL = 100
+HISTORY_LIMIT = 100
+SequenceSnapshot = tuple[list[Step], list[int]]
 
 
 class StepDialog(tk.Toplevel):
@@ -139,6 +141,8 @@ class ClickCueApp:
         self.root.minsize(620, 540)
 
         self.steps: list[Step] = []
+        self._undo_history: list[SequenceSnapshot] = []
+        self._redo_history: list[SequenceSnapshot] = []
         self.store = ProfileStore()
         self.player: Player | None = None
         self.capture_armed = False
@@ -158,6 +162,12 @@ class ClickCueApp:
         self.target_text = tk.StringVar()
 
         self._build_ui()
+        shortcuts = ((("<Command-z>", False), ("<Command-Shift-Z>", True))
+                     if sys.platform == "darwin" else
+                     (("<Control-z>", False), ("<Control-y>", True)))
+        for shortcut, redo in shortcuts:
+            self.root.bind(shortcut, lambda event, redo=redo:
+                           self._history_shortcut(event, redo))
         self._refresh_profile_list()
         self._update_title()
         self._update_target_text()
@@ -246,6 +256,12 @@ class ClickCueApp:
                                ("▲", lambda: self._move_step(-1)),
                                ("▼", lambda: self._move_step(1))]:
             ttk.Button(step_bar, text=label, command=command).pack(
+                side="left", padx=(0, 4))
+
+        history_bar = ttk.Frame(main)
+        history_bar.pack(fill="x", pady=(4, 0))
+        for label, command in [("Undo", self._undo), ("Redo", self._redo)]:
+            ttk.Button(history_bar, text=label, command=command).pack(
                 side="left", padx=(0, 4))
 
         loop_bar = ttk.LabelFrame(main, text="Playback", padding=8)
@@ -426,6 +442,53 @@ class ClickCueApp:
 
     # ----------------------------------------------------------------- steps
 
+    def _sequence_snapshot(self) -> SequenceSnapshot:
+        return ([replace(step) for step in self.steps],
+                sorted(self.tree.index(item) for item in self.tree.selection()))
+
+    def _record_edit(self, before: SequenceSnapshot) -> None:
+        if before[0] == self.steps:
+            return
+        self._undo_history.append(before)
+        del self._undo_history[:-HISTORY_LIMIT]
+        self._redo_history.clear()
+        self._mark_dirty()
+
+    def _reset_history(self) -> None:
+        self._undo_history.clear()
+        self._redo_history.clear()
+
+    def _undo(self) -> None:
+        self._restore_history(self._undo_history, self._redo_history)
+
+    def _redo(self) -> None:
+        self._restore_history(self._redo_history, self._undo_history)
+
+    def _restore_history(self, source: list[SequenceSnapshot],
+                         destination: list[SequenceSnapshot]) -> None:
+        if not source or self.player is not None or self.capture_armed:
+            return
+        destination.append(self._sequence_snapshot())
+        steps, selection = source.pop()
+        self.steps = [replace(step) for step in steps]
+        self._refresh_table()
+        children = self.tree.get_children()
+        self.tree.selection_set([children[index] for index in selection])
+        if selection:
+            self.tree.see(children[selection[0]])
+        # Settings/target edits are outside history: never infer a clean profile.
+        self._mark_dirty()
+
+    def _history_shortcut(self, event, redo: bool) -> str | None:
+        widget = event.widget
+        if (widget.winfo_toplevel() != self.root
+                or self.root.grab_current() is not None
+                or widget.winfo_class() in ("Entry", "TEntry", "Text", "Spinbox",
+                                            "TSpinbox", "TCombobox")):
+            return None
+        (self._redo if redo else self._undo)()
+        return "break"
+
     def _arm_capture(self) -> None:
         self.capture_armed = True
         self.status_text.set("Capture armed: move the cursor to the target "
@@ -434,8 +497,9 @@ class ClickCueApp:
     def _add_step(self, prefill: Step | None = None) -> None:
         dialog = StepDialog(self.root, "Add step", prefill)
         if dialog.result:
+            before = self._sequence_snapshot()
             self.steps.append(dialog.result)
-            self._mark_dirty()
+            self._record_edit(before)
             self._refresh_table()
 
     def _edit_step(self) -> None:
@@ -443,28 +507,31 @@ class ClickCueApp:
         if index is None:
             return
         dialog = StepDialog(self.root, "Edit step", self.steps[index])
-        if dialog.result:
+        if dialog.result and dialog.result != self.steps[index]:
+            before = self._sequence_snapshot()
             self.steps[index] = dialog.result
-            self._mark_dirty()
+            self._record_edit(before)
             self._refresh_table(select=index)
 
     def _remove_step(self) -> None:
         indices = sorted(self.tree.index(item) for item in self.tree.selection())
         if not indices:
             return
+        before = self._sequence_snapshot()
         for index in reversed(indices):
             del self.steps[index]
-        self._mark_dirty()
+        self._record_edit(before)
         self._refresh_table()
 
     def _copy_step(self) -> None:
         indices = sorted(self.tree.index(item) for item in self.tree.selection())
         if not indices:
             return
+        before = self._sequence_snapshot()
         copies = [replace(self.steps[index]) for index in indices]
         insert_at = indices[-1] + 1
         self.steps[insert_at:insert_at] = copies
-        self._mark_dirty()
+        self._record_edit(before)
         self._refresh_table()
         children = self.tree.get_children()
         self.tree.selection_set(children[insert_at:insert_at + len(copies)])
@@ -474,6 +541,7 @@ class ClickCueApp:
         indices = {self.tree.index(item) for item in self.tree.selection()}
         if not indices:
             return
+        before = self._sequence_snapshot()
         moved_to = None
         # Work from the leading edge so adjacent selected rows move together.
         for index in sorted(indices, reverse=offset > 0):
@@ -487,7 +555,7 @@ class ClickCueApp:
             moved_to = target
         if moved_to is None:
             return
-        self._mark_dirty()
+        self._record_edit(before)
         self._refresh_table()
         children = self.tree.get_children()
         self.tree.selection_set([children[index] for index in sorted(indices)])
@@ -580,6 +648,7 @@ class ClickCueApp:
             return
         self._loading = True
         try:
+            self._reset_history()
             self.steps = profile.steps
             self.loop_forever.set(profile.loop_forever)
             self.repetitions.set(str(profile.repetitions))
@@ -599,6 +668,7 @@ class ClickCueApp:
             return
         self._loading = True
         try:
+            self._reset_history()
             self.steps = []
             self.loop_forever.set(True)
             self.repetitions.set("10")

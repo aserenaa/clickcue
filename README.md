@@ -168,6 +168,16 @@ need their own.
 6. Save the sequence as a profile (*Save As…*) and reload it from the
    dropdown. *New* starts a fresh sequence.
 
+Use **Undo** / **Redo** for the last 100 sequence edits (add, capture, edit,
+copy, remove, and reorder, including multiple selected steps). Windows/Linux:
+**Ctrl+Z** / **Ctrl+Y**; macOS: **Command+Z** / **Shift+Command+Z**. Shortcuts
+leave text fields and dialogs to their native editing controls. Undo/redo is
+unavailable during playback or while capture is armed. A new sequence edit clears
+redo; New and opening another profile clear both histories. Settings and target
+window changes are outside this history. Undo/redo marks the profile unsaved,
+even when the sequence returns to its saved content; save again to clear the mark.
+
+
 ## Profiles
 
 Profiles are plain JSON files in `~/.clickcue/profiles/`. Save one with
