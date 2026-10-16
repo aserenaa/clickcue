@@ -21,6 +21,7 @@ from .playback import Player
 from .preparation import PlaybackPreparation
 from .preview import show_preview
 from .profiles import Profile, ProfileStore, read_profile, write_profile
+from .recording import ClickRecording
 
 APP_NAME = "ClickCue"
 EVENT_POLL_MS = 80
@@ -193,6 +194,10 @@ class ClickCueApp:
         self._closed = False
         self._closing = False
         self.capture_armed = False
+        self._recording: ClickRecording | None = None
+        # Read-only modal dialogs must consume queued recording-start hotkeys
+        # before releasing this token. Stop bypasses it on the callback thread.
+        self._recording_modal = False
         self._preview_active = False
         self.current_profile: str | None = None
         self.imported_profile_name: str | None = None
@@ -207,6 +212,7 @@ class ClickCueApp:
         self.hotkeys = load_hotkeys()
         self._hotkey_lock = Lock()
         self._pressed_keys: set = set()
+        self._held_modifiers: set[str] = set()
 
         self.loop_forever = tk.BooleanVar(value=True)
         self.repetitions = tk.StringVar(value="10")
@@ -318,7 +324,7 @@ class ClickCueApp:
         footer = ttk.Frame(main)
         footer.pack(side="bottom", fill="x", before=table_frame)
         step_bar = ttk.Frame(footer)
-        step_bar.pack(fill="x", pady=(8, 0))
+        step_bar.pack(fill="x", pady=(4, 0))
         self.capture_button = ttk.Button(
             step_bar, text=f"Capture ({self.hotkeys.capture})",
             command=self._arm_capture)
@@ -338,8 +344,22 @@ class ClickCueApp:
             ttk.Button(history_bar, text=label, command=command).pack(
                 side="left", padx=(0, 4))
 
-        loop_bar = ttk.LabelFrame(footer, text="Playback", padding=8)
-        loop_bar.pack(fill="x", pady=(10, 0))
+        record_bar = ttk.Frame(footer)
+        record_bar.pack(fill="x", pady=(4, 0))
+        self.record_button = ttk.Button(record_bar, text="Record clicks", command=self._arm_recording)
+        self.record_button.pack(side="left", padx=(0, 4))
+        self.review_recording_button = ttk.Button(
+            record_bar, text="Review recording…", command=self._review_recording, state="disabled")
+        self.review_recording_button.pack(side="left", padx=(0, 4))
+        self.keep_recording_button = ttk.Button(
+            record_bar, text="Keep recording", command=self._keep_recording, state="disabled")
+        self.keep_recording_button.pack(side="left", padx=(0, 4))
+        self.discard_recording_button = ttk.Button(
+            record_bar, text="Discard", command=self._discard_recording, state="disabled")
+        self.discard_recording_button.pack(side="left")
+
+        loop_bar = ttk.LabelFrame(footer, text="Playback", padding=(8, 4))
+        loop_bar.pack(fill="x", pady=(6, 0))
         ttk.Radiobutton(loop_bar, text="Loop forever",
                         variable=self.loop_forever, value=True).pack(side="left")
         ttk.Radiobutton(loop_bar, text="Repeat", variable=self.loop_forever,
@@ -349,7 +369,7 @@ class ClickCueApp:
         ttk.Label(loop_bar, text="times").pack(side="left", padx=(4, 0))
 
         control_bar = ttk.Frame(footer)
-        control_bar.pack(fill="x", pady=(10, 0))
+        control_bar.pack(fill="x", pady=(6, 0))
         self.start_button = ttk.Button(control_bar, text=f"▶ Start ({self.hotkeys.toggle})",
                                        command=self._toggle_playback)
         self.start_button.pack(side="left")
@@ -369,8 +389,8 @@ class ClickCueApp:
         status_label.bind("<Configure>", lambda event:
                           status_label.configure(wraplength=max(1, event.width)))
 
-        hotkey_bar = ttk.LabelFrame(footer, text="Global hotkeys (this machine)", padding=8)
-        hotkey_bar.pack(fill="x", pady=(10, 0))
+        hotkey_bar = ttk.LabelFrame(footer, text="Global hotkeys (this machine)", padding=(8, 4))
+        hotkey_bar.pack(fill="x", pady=(6, 0))
         self.toggle_key = tk.StringVar(value=self.hotkeys.toggle)
         self.capture_key = tk.StringVar(value=self.hotkeys.capture)
         for label, variable in (("Start/stop", self.toggle_key),
@@ -382,7 +402,7 @@ class ClickCueApp:
             hotkey_bar, text="Apply", command=self._apply_hotkeys)
         self.hotkey_apply_button.pack(side="left")
         self.hotkey_hint = ttk.Label(footer, text=self._hint_text(), wraplength=580)
-        self.hotkey_hint.pack(fill="x", pady=(10, 0))
+        self.hotkey_hint.pack(fill="x", pady=(4, 0))
         self.hotkey_hint.bind("<Configure>", lambda event:
                               self.hotkey_hint.configure(wraplength=max(1, event.width)))
         self.root.update_idletasks()
@@ -401,7 +421,7 @@ class ClickCueApp:
 
     def _editing_blocked(self) -> bool:
         return (self._closed or self._closing or self.player is not None
-                or self._preparation is not None)
+                or self._preparation is not None or getattr(self, "_recording", None) is not None)
 
     def _update_editing_controls(self) -> None:
         state = "disabled" if self._editing_blocked() else "!disabled"
@@ -414,17 +434,30 @@ class ClickCueApp:
         for widget in self._editing_controls:
             # Toggle only disabled, preserving readonly combobox state.
             widget.state([state])
+        if hasattr(self, "record_button"):
+            recording = self._recording
+            self.record_button.state(["disabled" if self._editing_blocked()
+                                      or self.capture_armed or self._preview_active else "!disabled"])
+            review = (recording is not None and recording.finished.is_set()
+                      and not self._closed and not self._closing and not self._preview_active)
+            for widget in (self.review_recording_button, self.keep_recording_button,
+                           self.discard_recording_button):
+                widget.state(["!disabled" if review else "disabled"])
+            if recording is not None:
+                self.start_button.configure(
+                    text=f"■ Stop ({self.hotkeys.toggle})",
+                    state="disabled" if recording.finished.is_set() else "normal")
 
     def _hint_text(self) -> str:
-        hotkeys = (f"Global hotkeys: {self.hotkeys.toggle} start/stop, "
+        hotkeys = (f"{self.hotkeys.toggle} start/stop, "
                    f"{self.hotkeys.capture} capture cursor position. "
-                   "Apply changes while stopped and capture is not armed.")
+                   f"Record clicks: {self.hotkeys.capture} begins, "
+                   f"{self.hotkeys.toggle} stops for review. "
+                   "Apply while stopped; finish capture/recording first.")
         if sys.platform == "darwin":
-            return (f"{hotkeys} Requires Accessibility and Input Monitoring "
-                    "permissions (System Settings → Privacy & Security) for "
-                    f"the app running Python. On Mac keyboards use Fn+{self.hotkeys.toggle}/"
-                    f"Fn+{self.hotkeys.capture} "
-                    "if the F-keys control brightness or volume.")
+            return (f"{hotkeys} macOS: enable Accessibility and Input Monitoring "
+                    "for your Python launcher in System Settings → Privacy & Security. "
+                    f"Use Fn+{self.hotkeys.toggle}/Fn+{self.hotkeys.capture} if needed.")
         return hotkeys
 
     def _show_diagnostics(self) -> None:
@@ -501,12 +534,34 @@ class ClickCueApp:
 
     def _on_key(self, key) -> None:
         with self._hotkey_lock:
+            # Retain only fixed modifier names, never typed characters. A
+            # modifier already held when arming cannot create a plain click.
+            for name in ("shift", "shift_l", "shift_r", "ctrl", "ctrl_l", "ctrl_r",
+                         "alt", "alt_l", "alt_r", "alt_gr", "cmd", "cmd_l", "cmd_r"):
+                if key == getattr(keyboard.Key, name, None):
+                    self._held_modifiers.add(name)
+            recording = getattr(self, "_recording", None)
+            if recording is not None:
+                # Cut off at the global callback, not a later Tk poll. Never
+                # enqueue a playback toggle or retain non-control key values.
+                if key not in (getattr(keyboard.Key, self.hotkeys.toggle.lower()),
+                               getattr(keyboard.Key, self.hotkeys.capture.lower())):
+                    recording.stop("Keyboard input detected; only plain left clicks are supported")
+                    return
             if key not in (getattr(keyboard.Key, name.lower()) for name in FUNCTION_KEYS):
                 return
             if key in self._pressed_keys:
                 return
             self._pressed_keys.add(key)
             if getattr(self, "_preview_active", False):
+                return
+            if recording is not None:
+                if key == getattr(keyboard.Key, self.hotkeys.toggle.lower()):
+                    recording.stop()
+                    self.events.put(("record_stopping", recording))
+                else:
+                    if not self._recording_modal:
+                        self.events.put(("record_begin", recording))
                 return
             if key == getattr(keyboard.Key, self.hotkeys.toggle.lower()):
                 self.events.put(("hotkey_toggle",))
@@ -517,6 +572,15 @@ class ClickCueApp:
     def _on_key_release(self, key) -> None:
         with self._hotkey_lock:
             self._pressed_keys.discard(key)
+            recording = getattr(self, "_recording", None)
+            if (recording is not None
+                    and key not in (getattr(keyboard.Key, self.hotkeys.toggle.lower()),
+                                    getattr(keyboard.Key, self.hotkeys.capture.lower()))):
+                recording.stop("Keyboard input detected; only plain left clicks are supported")
+            if hasattr(self, "_held_modifiers"):
+                for name in tuple(self._held_modifiers):
+                    if key == getattr(keyboard.Key, name, None):
+                        self._held_modifiers.discard(name)
 
     def _poll_events(self) -> None:
         if self._closed:
@@ -539,6 +603,33 @@ class ClickCueApp:
             self._finish_preparation(event[1])
         elif kind == "preview_closed":
             self._preview_active = False
+            self._update_editing_controls()
+        elif kind in ("record_started", "record_stopping", "record_finished"):
+            recording = event[1]
+            if self._closed or recording is not self._recording:
+                return
+            if kind == "record_finished":
+                prefix = "Partial recording" if recording.reason else "Recording stopped"
+                self.status_text.set(
+                    f"{prefix}: {len(recording.steps)} completed clicks. "
+                    f"{recording.reason + '. ' if recording.reason else ''}"
+                    "Review, then Keep recording or Discard; nothing appended yet.")
+                self._last_stop = self.status_text.get()
+            elif kind == "record_started" and not recording.finished.is_set():
+                self.status_text.set(f"Recording plain left clicks — {self.hotkeys.toggle} stops. "
+                                     "Other actions stop with a partial recording.")
+            elif kind == "record_stopping" and not recording.finished.is_set():
+                self.status_text.set("Stopping recording; waiting for observation/listener cleanup…")
+            self._update_editing_controls()
+        elif kind == "record_begin":
+            if (event[1] is self._recording and not self._closed and not self._closing
+                    and not self._recording.finished.is_set()
+                    and not self._preview_active and not self._recording_modal
+                    and not self.root.tk.call("grab", "current", self.root)):
+                self._recording.begin()
+        elif kind == "record_modal_closed":
+            if event[1] is self._recording_modal:
+                self._recording_modal = False
         elif kind == "close_cancelled":
             self._closing = False
             self._update_editing_controls()
@@ -570,6 +661,7 @@ class ClickCueApp:
         elif kind == "hotkey_capture":
             if self.capture_armed and not self._editing_blocked():
                 self.capture_armed = False
+                self._update_editing_controls()
                 self._refresh_target_bounds()
                 self._add_step(prefill=Step("New step", event[1], event[2], 1.0))
         elif kind in ("waiting", "playing", "condition_waiting"):
@@ -667,7 +759,7 @@ class ClickCueApp:
     def _preview_sequence(self) -> None:
         if self._closed or self._closing:
             return
-        if (self.player is not None or self.capture_armed
+        if (getattr(self, "_recording", None) is not None or self.player is not None or self.capture_armed
                 or self._preparation is not None or self._preview_active):
             messagebox.showinfo("Preview only", "Stop playback and finish capture "
                                 "before previewing.", parent=self.root)
@@ -691,6 +783,11 @@ class ClickCueApp:
 
     def _toggle_playback(self) -> None:
         if self._closed:
+            return
+        if getattr(self, "_recording", None) is not None:
+            self._recording.stop()
+            if not self._recording.finished.is_set():
+                self._handle_event(("record_stopping", self._recording))
             return
         if self._preparation is not None:
             self._preparation.windows.cancelled.set()
@@ -724,7 +821,7 @@ class ClickCueApp:
         self.player.request_control(action)
 
     def _start_playback(self, selected_only: bool = False) -> None:
-        if (self._closing or self._preview_active
+        if (getattr(self, "_recording", None) is not None or self._closing or self._preview_active
                 or self.root.tk.call("grab", "current", self.root)):
             return
         indices = list(range(len(self.steps)))
@@ -867,8 +964,83 @@ class ClickCueApp:
         if self._editing_blocked():
             return
         self.capture_armed = True
+        self._update_editing_controls()
         self.status_text.set("Capture armed: move the cursor to the target "
                              f"point and press {self.hotkeys.capture}")
+
+    # -------------------------------------------------------------- recording
+
+    def _arm_recording(self) -> None:
+        if (self._editing_blocked() or self.capture_armed or self._preview_active
+                or self.root.tk.call("grab", "current", self.root)):
+            return
+        if sys.platform not in ("win32", "darwin"):
+            messagebox.showinfo("Record clicks", "Anchored recording is unavailable on this platform.",
+                                parent=self.root)
+            return
+        if self.target_window is None or not self.target_window.has_bounds:
+            messagebox.showinfo("Record clicks", "Choose a target window with saved bounds first.",
+                                parent=self.root)
+            return
+        with self._hotkey_lock:
+            modifiers_held = bool(self._held_modifiers)
+            if not modifiers_held:
+                self._recording = ClickRecording(self.target_window, self.events)
+        if modifiers_held:
+            messagebox.showinfo("Record clicks", "Release modifier keys before arming recording.",
+                                parent=self.root)
+            return
+        self._run_settings = (self.loop_forever.get(), self.repetitions.get())
+        self.status_text.set(f"Recording armed — switch to your target; {self.hotkeys.capture} begins, "
+                             f"{self.hotkeys.toggle} stops. Keep the target at its saved bounds.")
+        self._update_editing_controls()
+        self._recording.start()
+
+    def _recording_review_available(self) -> bool:
+        return (self._recording is not None and self._recording.finished.is_set()
+                and not self._closed and not self._closing and not self._preview_active
+                and not self.root.tk.call("grab", "current", self.root))
+
+    def _review_recording(self) -> None:
+        if not self._recording_review_available():
+            return
+        if not self._recording.steps:
+            messagebox.showinfo("Recording empty", "No completed clicks to review. Choose Discard.",
+                                parent=self.root)
+            return
+        self._preview_active = True
+        self._update_editing_controls()
+        try:
+            show_preview(self.root, [replace(step) for step in self._recording.steps])
+        finally:
+            self.events.put(("preview_closed",))
+
+    def _keep_recording(self) -> None:
+        if not self._recording_review_available():
+            return
+        recorded = self._recording.steps
+        if recorded:
+            before = self._sequence_snapshot()
+            first = len(self.steps)
+            self.steps.extend(replace(step) for step in recorded)
+            self._record_edit(before)
+            self._refresh_table()
+            rows = self.tree.get_children()[first:]
+            self.tree.selection_set(rows)
+            self.tree.focus(rows[0])
+            self.tree.see(rows[0])
+        self._discard_recording()
+        self.status_text.set(f"Kept {len(recorded)} recorded clicks; review/edit before playback")
+
+    def _discard_recording(self) -> None:
+        if not self._recording_review_available():
+            return
+        with self._hotkey_lock:
+            self._recording = None
+        self._run_settings = None
+        self.start_button.configure(text=f"▶ Start ({self.hotkeys.toggle})", state="normal")
+        self.status_text.set("Recording discarded; sequence unchanged")
+        self._update_editing_controls()
 
     def _add_step(self, prefill: Step | None = None) -> None:
         if self._editing_blocked():
@@ -1017,19 +1189,27 @@ class ClickCueApp:
             self.profile_errors_button.pack_forget()
 
     def _show_profile_errors(self) -> None:
-        self._refresh_profile_list()
-        if not self.store.list_errors:
-            return
-        details = "\n".join(f"{name}: {reason}"
-                            for name, reason in self.store.list_errors.items())
-        messagebox.showwarning(
-            "Profile errors",
-            f"Some files in {self.store.directory} could not be listed:\n\n"
-            f"{details}\n\n"
-            "Files were left unchanged. Check their JSON, filenames and read "
-            "permissions. Correct them, then click Profile errors again to "
-            "refresh the list.",
-            parent=self.root)
+        recording = getattr(self, "_recording", None)
+        modal = object()
+        if recording is not None:
+            self._recording_modal = modal
+        try:
+            self._refresh_profile_list()
+            if not self.store.list_errors:
+                return
+            details = "\n".join(f"{name}: {reason}"
+                                for name, reason in self.store.list_errors.items())
+            messagebox.showwarning(
+                "Profile errors",
+                f"Some files in {self.store.directory} could not be listed:\n\n"
+                f"{details}\n\n"
+                "Files were left unchanged. Check their JSON, filenames and read "
+                "permissions. Correct them, then click Profile errors again to "
+                "refresh the list.",
+                parent=self.root)
+        finally:
+            if recording is not None:
+                self.events.put(("record_modal_closed", modal))
 
     def _confirm_discard(self) -> bool:
         if not self.dirty:
@@ -1184,22 +1364,31 @@ class ClickCueApp:
         self.status_text.set(f"Imported “{profile.name}”; use Save to keep a local copy")
 
     def _export_profile(self) -> None:
-        name = self.current_profile or self.imported_profile_name or "Unsaved sequence"
-        filename = filedialog.asksaveasfilename(
-            parent=self.root, title="Export profile", defaultextension=".json",
-            initialfile="profile.json",
-            filetypes=[("JSON profiles", "*.json"), ("All files", "*.*")])
-        if not filename:
-            return
+        recording = getattr(self, "_recording", None)
+        modal = object()
+        if recording is not None:
+            self._recording_modal = modal
         try:
-            profile = Profile(name, list(self.steps), self.loop_forever.get(),
-                              self._repetition_count(), self.target_window)
-            write_profile(Path(filename), profile)
-        except (OSError, ValueError) as exc:
-            messagebox.showerror("Export failed", f"Could not export profile: {exc}",
-                                 parent=self.root)
-            return
-        self.status_text.set(f"Exported profile to {filename}")
+            name = self.current_profile or self.imported_profile_name or "Unsaved sequence"
+            filename = filedialog.asksaveasfilename(
+                parent=self.root, title="Export profile", defaultextension=".json",
+                initialfile="profile.json",
+                filetypes=[("JSON profiles", "*.json"), ("All files", "*.*")])
+            if not filename:
+                return
+            try:
+                profile = Profile(name, list(self.steps), self.loop_forever.get(),
+                                  self._repetition_count(), self.target_window)
+                write_profile(Path(filename), profile)
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("Export failed", f"Could not export profile: {exc}",
+                                     parent=self.root)
+                return
+            if recording is None:
+                self.status_text.set(f"Exported profile to {filename}")
+        finally:
+            if recording is not None:
+                self.events.put(("record_modal_closed", modal))
 
     def _delete_profile(self) -> None:
         if self._editing_blocked():
@@ -1233,10 +1422,18 @@ class ClickCueApp:
         if self._closed or self._closing:
             return
         self._closing = True
+        recording = getattr(self, "_recording", None)
+        if recording is not None:
+            recording.stop()
         self._update_editing_controls()
         # Confirmation runs a nested Tk loop that can deliver worker completion.
         if self._preparation is not None:
             self._preparation.windows.cancelled.set()
+        if recording is not None and not messagebox.askyesno(
+                "Discard recording?", "Close and discard the pending recording? "
+                "Cancel to review it with Keep recording or Discard.", parent=self.root):
+            self.events.put(("close_cancelled",))
+            return
         if self.dirty and not self._confirm_discard():
             # Consume modal hotkeys before allowing a new Start, including a
             # toggle queued immediately before the confirmation was dismissed.
