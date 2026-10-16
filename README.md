@@ -58,6 +58,9 @@ for next time. **F6** starts or stops playback even when another app has focus.
   labels can overlap; use the list to read each step's exact position.
 - 📍 **Visual capture** — hover the cursor over the target and press **F8**; the
   position is captured without sending a click to the app underneath.
+- **Record clicks** — choose one target window, arm recording, then use the
+  capture hotkey to begin. Completed plain left clicks become ordinary editable
+  steps only when you choose **Keep recording**. See [Recording clicks](#recording-clicks).
 - 📋 **Copy multiple steps** — select a range or separate steps and duplicate
   them together, preserving their order and settings.
 - 🔁 **Loop playback** — run a sequence once, N times, or forever. **F6** starts
@@ -175,6 +178,65 @@ that do not conflict with shortcuts in your target app or operating system.
 | **Double-click** a step | Edit its name, delay, coordinates, or wait-only mode |
 | **Shift-click** | Select a range of steps |
 | **Command-click** / **Ctrl-click** | Select separate steps on macOS / Windows and Linux |
+
+### Recording clicks
+
+Choose **Target window → Choose…** first and keep that window at its saved
+position and size. Click **Record clicks**, switch to the target, and press the
+configured capture key (**F8** by default) to begin. Wait for the status to say
+**Recording plain left clicks** before clicking. The configured start/stop key
+(**F6** by default) ends recording; it does not start playback. The on-screen
+Stop recording button also ends it. The controls and hints show your actual keys.
+Recording is available on Windows and macOS only; Linux/X11 has no required
+window helpers, and this feature makes no Wayland support claim.
+
+Only completed stationary left-button press/release pairs are retained, named
+**Recorded click 1**, **Recorded click 2**, and so on. Movement within a radius
+of four screen units during a press counts as normal jitter (screen points on
+macOS, physical pixels on Windows); exceeding it, even if you return to the
+press point, stops recording as a drag. Other buttons, scrolling, or any keyboard
+input except the two configured control hotkeys stop recording with a clearly
+labeled **partial recording**. Keyboard values/text are not buffered or saved.
+A held mouse button at Stop produces no step. Start with all mouse buttons and
+non-control keys released. Repeated capture-key presses during recording do not
+add manual captures.
+
+The first step has zero delay. Each later delay measures the monotonic gap
+from the previous release to the next press; there is no trailing idle wait.
+Timing is approximate: playback adds its normal pointer positioning, fixed
+button hold, and window checks. Recorded hold durations are not reproduced.
+This records clicks, not keyboard shortcuts, dragging, scrolling, or app actions.
+
+Stopping leaves the buffer separate from your sequence. **Review recording…**
+shows its positions, names and delays using the read-only preview. **Keep
+recording** appends and selects the new rows, marks the profile unsaved, and
+creates one Undo transaction. You can then edit, save, export, or replay them
+normally using the existing profile format (schema 2). **Discard**, an empty
+recording, or cancelling before any clicks leaves steps, selection, unsaved
+state, and both undo histories unchanged. Nothing is automatically appended,
+saved, or replayed. Stop, close, and read-only Diagnostics stay responsive;
+editing, playback, manual capture, target/profile/repeat/hotkey changes and
+ordinary preview are locked until you keep or discard. Close stops capture
+before asking to discard; cancelling close leaves it stopped for review.
+Export and Profile errors remain available. Export writes the existing sequence,
+excluding the pending buffer. Recording-start hotkeys are suppressed through
+these read-only modal dialogs, including queued events; Stop still cuts off capture.
+
+Recording resolves one unique live native window and rejects missing, ambiguous,
+replacement, moved/resized, covered, or unknown targets. Saved anchor bounds
+are never refreshed to reinterpret existing coordinates. All ClickCue windows,
+including its dialogs and Diagnostics, are excluded; clicking them can stop
+recording with a partial prefix. Recording never focuses or moves any window.
+Native observations run in the background at press/release checks and are
+best effort: delayed callbacks/lookups, permissions, mouse capture, native ID
+reuse, application hit testing and changes between observations mean they
+cannot prove which window received an earlier click. Listener failure retains
+the completed prefix as partial; OS lookup/cleanup may delay review, while Stop
+still cuts off new callbacks. A new session waits for the old listener's cleanup.
+Buffers are limited to 256 pending events and 10,000 completed clicks; reaching
+a limit stops with a partial recording. Test in a harmless window first.
+
+### Building a sequence
 
 1. **Choose the target window** (*Target window → Choose…*): pick the app the
    profile will click on. Its current position and size are recorded so the
@@ -454,7 +516,8 @@ names, coordinates, delays, and the target application's name (or window title
 on Windows) and bounds. Window titles and step names can reveal private
 information. Review and sanitize profiles and screenshots before sharing them.
 The global keyboard listener handles the chosen function keys (F6 and F8 by
-default); ClickCue does not save typed text. Machine-local key preferences stay
+default), tracks fixed modifier held-state, and stops recording on unsupported
+keyboard input; ClickCue does not buffer or save typed text. Machine-local key preferences stay
 in `~/.clickcue/hotkeys.json`. Installation and dependency/security checks
 contact package services.
 

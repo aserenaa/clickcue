@@ -1,7 +1,7 @@
 """Real Tk contracts, without OS input, listeners, or personal profiles."""
 
 import tkinter as tk
-from tkinter import font
+from tkinter import font, ttk
 from unittest.mock import Mock
 
 import pytest
@@ -157,7 +157,12 @@ def test_large_font_rows_fit_text_and_window_can_grow(app, request):
         row = app.tree.bbox(app.tree.get_children()[0])
         assert row and row[1] + row[3] <= app.tree.winfo_height()
         table_heights.append(app.tree.winfo_height())
-        for control in app.start_button.master.winfo_children():
+        # This is the sole footer geometry owner: include recording alongside
+        # the existing controls when checking narrow windows.
+        footer = app.start_button.master.master
+        controls = [widget for bar in footer.winfo_children() for widget in bar.winfo_children()
+                    if isinstance(widget, ttk.Button)]
+        for control in controls:
             assert control.winfo_ismapped()
             assert control.winfo_rootx() >= app.root.winfo_rootx()
             assert control.winfo_rootx() + control.winfo_width() <= (
