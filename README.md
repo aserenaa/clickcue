@@ -142,6 +142,15 @@ need their own.
 
 ## Usage
 
+Choose **Diagnostics…** for a read-only snapshot of the platform, input backends,
+saved target, current status, last stop and playback/preparation error, and cached
+profile listing failures. Close with **Escape** or **Close**; reopen to refresh.
+Text can be selected and copied (Ctrl+A / Command+A selects all). Diagnostics
+does not check live target availability or permissions, rescan profiles, or send
+input. Unknown permissions and unsupported window platforms are labeled explicitly.
+Use the existing **Profile errors** control to refresh listing failures. Review
+private window names, paths, and error details before sharing copied text.
+
 Under *Global hotkeys (this machine)*, choose separate **F1–F12** keys for
 start/stop and capture, then click *Apply*. Stop playback and finish any armed
 capture before applying changes. Holding a key triggers its action once;

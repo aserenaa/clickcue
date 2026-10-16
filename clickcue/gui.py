@@ -10,6 +10,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from pynput import keyboard, mouse
 
+from .diagnostics import show_diagnostics
 from .events import EventQueue
 from .hotkeys import (FUNCTION_KEYS, HotkeySettings, create_hotkey_listener,
                       load_hotkeys, save_hotkeys)
@@ -159,6 +160,8 @@ class ClickCueApp:
         self.dirty = False
         self._loading = False
         self._blocked_status: str | None = None
+        self._last_stop = "None recorded this session"
+        self._last_error = "None recorded this session"
         self._highlighted_step: int | None = None
         self.events: queue.Queue = EventQueue()
         self.hotkeys = load_hotkeys()
@@ -295,6 +298,8 @@ class ClickCueApp:
         self.start_button.pack(side="left")
         ttk.Button(control_bar, text="Preview only…",
                    command=self._preview_sequence).pack(side="left", padx=(6, 0))
+        ttk.Button(control_bar, text="Diagnostics…",
+                   command=self._show_diagnostics).pack(side="left", padx=(6, 0))
         ttk.Label(control_bar, textvariable=self.status_text).pack(
             side="left", padx=(12, 0))
 
@@ -325,6 +330,40 @@ class ClickCueApp:
                     f"Fn+{self.hotkeys.capture} "
                     "if the F-keys control brightness or volume.")
         return hotkeys
+
+    def _show_diagnostics(self) -> None:
+        window_support = ("Available on this platform; live target not checked"
+                          if sys.platform in ("darwin", "win32") else
+                          "Unsupported on this platform")
+        target = self.target_window
+        if target is None:
+            target_details = "None saved (absolute coordinates)"
+        else:
+            bounds = (f"{target.width} x {target.height} at ({target.x}, {target.y})"
+                      if target.has_bounds else "no saved bounds")
+            target_details = f"{target.app}; {bounds}; live availability not checked"
+        profile_errors = "\n".join(
+            f"  {name}: {reason}" for name, reason in self.store.list_errors.items())
+        show_diagnostics(self.root, "\n".join([
+            f"Platform: {sys.platform}; Python {sys.version.split()[0]}",
+            f"Mouse backend: {mouse.Controller.__module__}",
+            f"Keyboard backend: {keyboard.Listener.__module__}",
+            "Permissions: Unknown — diagnostics does not probe permissions. "
+            "Backend selection does not prove input delivery or hotkey access.",
+            ("macOS: Check Accessibility for input and Input Monitoring for "
+             "global hotkeys in System Settings > Privacy & Security."
+             if sys.platform == "darwin" else
+             "Input delivery and global hotkey permissions are not verified."),
+            f"Window lookup/guard support: {window_support}",
+            f"Saved target: {target_details}",
+            f"Current status: {self.status_text.get()}",
+            f"Last stop: {self._last_stop}",
+            f"Last playback/preparation error: {self._last_error}",
+            f"Profile folder: {self.store.directory}",
+            f"Profile listing errors (last refresh):\n{profile_errors or '  None recorded'}",
+            "Use Profile errors to refresh listing failures. Diagnostics does not "
+            "rescan files, send input, focus or move target windows.",
+        ]))
 
     def _update_title(self) -> None:
         name = self.current_profile or "unsaved sequence"
@@ -413,8 +452,8 @@ class ClickCueApp:
             self._preparation = None
             self.start_button.configure(
                 text=f"▶ Start ({self.hotkeys.toggle})", state="normal")
-            self.status_text.set(
-                "Stopped" if preparation.windows.cancelled.is_set() else status)
+            self._last_stop = "Stopped" if preparation.windows.cancelled.is_set() else status
+            self.status_text.set(self._last_stop)
         elif kind == "hotkey_toggle":
             self._toggle_playback()
         elif kind == "hotkey_capture":
@@ -434,6 +473,7 @@ class ClickCueApp:
             self.player = None
             self.start_button.configure(text=f"▶ Start ({self.hotkeys.toggle})")
             self.status_text.set(self._blocked_status or "Stopped")
+            self._last_stop = self._blocked_status or "Stopped (completion or cancellation)"
             self._blocked_status = None
             self._highlight_step(None)
         elif kind == "blocked":
@@ -442,6 +482,7 @@ class ClickCueApp:
                 f"Stopped — target not found at ({x}, {y}) for “{step_name}”; "
                 f"detected: {covering}")
         elif kind == "error":
+            self._last_error = str(event[1])
             hint = ""
             if sys.platform == "darwin":
                 hint = ("\n\nCheck that the app running Python has the "
@@ -552,6 +593,7 @@ class ClickCueApp:
         accepted = not windows.cancelled.is_set()
         if accepted and preparation.error is not None:
             accepted = False
+            self._last_error = str(preparation.error)
             messagebox.showerror("Preparation failed", str(preparation.error))
         if accepted and prepared is not None and prepared.missing_target:
             accepted = False
