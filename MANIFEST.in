@@ -1,0 +1,3 @@
+include CHANGELOG.md CONTRIBUTING.md SECURITY.md THIRD_PARTY_NOTICES.md
+include docs/PUBLISHING.md
+recursive-include tests *.py

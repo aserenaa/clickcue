@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/aserenaa/clickcue/security/advisories/new
+    about: Do not include vulnerability details or private profiles in a public issue.

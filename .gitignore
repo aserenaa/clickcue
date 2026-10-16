@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.DS_Store
+claudedocs/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Credentials and machine-local data must never be published.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+.clickcue/
+profiles/
+*.log
