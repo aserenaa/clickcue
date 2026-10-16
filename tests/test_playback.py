@@ -38,6 +38,34 @@ def test_countdown_updates_before_click(controller):
         player.join(timeout=2)
 
 
+@pytest.mark.parametrize("steps", [[], [Step("No pause", 0, 0, 0, wait_only=True)]])
+def test_infinite_zero_work_sequence_stops_with_error(controller, monkeypatch, steps):
+    monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
+    events = queue.Queue()
+    player = Player(steps, loop_forever=True, repetitions=1, events=events)
+    player.start()
+    try:
+        player.join(timeout=0.2)
+        assert not player.is_alive()
+        received = list(events.queue)
+        assert [event[0] for event in received] == ["error", "stopped"]
+        assert "delay" in received[0][1]
+        controller.press.assert_not_called()
+    finally:
+        player.stop()
+        player.join(timeout=2)
+
+
+def test_finite_zero_delay_wait_sequence_completes(controller):
+    events = queue.Queue()
+    player = Player([Step("No pause", 0, 0, 0, wait_only=True)],
+                    loop_forever=False, repetitions=2, events=events)
+    player.run()
+    assert list(events.queue) == [("playing", 1, 0, "No pause"),
+                                  ("playing", 2, 0, "No pause"), ("stopped",)]
+    controller.press.assert_not_called()
+
+
 @pytest.mark.parametrize("wait_only", [False, True])
 def test_stop_interrupts_countdown_without_click(controller, wait_only):
     events = queue.Queue()
