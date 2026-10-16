@@ -55,6 +55,8 @@ def editor(selection):
                  for index, name in enumerate("ABCDE")]
     app.tree = Tree()
     app.root = Mock()
+    app.root.tk.call.return_value = ""
+    app._editing_controls = []
     app.player = None
     app.capture_armed = False
     app._preparation = None

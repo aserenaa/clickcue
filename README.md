@@ -199,10 +199,16 @@ that do not conflict with shortcuts in your target app or operating system.
    the wait before pressing. If the mouse button is already held, stopping
    releases it promptly. A press already being sent to the OS may still occur.
    Window preparation runs in the background using a snapshot of the steps,
-   repeat settings, and anchor at Start. Stop/F6 also cancels preparation;
+   repeat settings, and anchor at Start. Editing steps, profiles, targets,
+   repeat settings, hotkeys, and capture is disabled until preparation/playback
+   finishes, including cancellation. Start disarms pending capture and is ignored
+   while a modal dialog is open. Stop and closing the app remain available;
+   table scrolling/selection, profile error details, and Export remain usable
+   because they do not edit the sequence. Preview only remains available while
+   stopped and capture is not armed. Stop/F6 also cancels preparation;
    cancelling prevents playback even if an OS window call finishes later.
    OS window calls cannot be interrupted, so another Start becomes available
-   once the pending call returns. Changes in the editor apply to the next run.
+   once the pending call returns. Editing becomes available again after the run stops.
    Closing cancels preparation even if you keep editing at the unsaved-changes
    prompt; use Start again when ready.
    If the saved target is unavailable, click playback stays stopped: open the

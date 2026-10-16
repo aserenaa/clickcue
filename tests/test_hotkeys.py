@@ -131,6 +131,8 @@ def test_preferences_round_trip_and_failed_replace_preserves_previous_file(tmp_p
 
 @pytest.fixture
 def settings_app(app, monkeypatch, tmp_path):
+    app._closed = False
+    app._closing = False
     app.root = Mock()
     app.player = None
     app._preparation = None
