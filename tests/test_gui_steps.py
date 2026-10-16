@@ -57,6 +57,10 @@ def editor(selection):
     app.root = Mock()
     app.root.tk.call.return_value = ""
     app._editing_controls = []
+    app.run_selected_button = Mock()
+    app.pause_button = Mock()
+    app._run_indices = None
+    app._pending_control = None
     app.player = None
     app.capture_armed = False
     app._preparation = None
