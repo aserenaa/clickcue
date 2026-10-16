@@ -1,3 +1,4 @@
+from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
@@ -91,10 +92,10 @@ def test_remove_selected_steps(selection, remaining):
 ])
 def test_move_selected_steps(selection, offset, expected, selected):
     app = editor(selection)
-    original = {step.name: step for step in app.steps}
+    original = {step.name: replace(step) for step in app.steps}
     app._move_step(offset)
     assert "".join(step.name for step in app.steps) == expected
-    assert all(step is original[step.name] for step in app.steps)
+    assert all(step == original[step.name] for step in app.steps)
     assert_rows_match_steps(app)
     selected_items = app.tree.selection()
     assert "".join(app.tree.rows[item][1] for item in sorted(
@@ -205,12 +206,20 @@ def test_history_cannot_change_sequence_while_busy(busy):
 def test_add_capture_and_edit_round_trip(monkeypatch):
     app = editor([1])
     app._refresh_target_bounds = Mock()
-    results = iter([Step("Added", 10, 20, 1), Step("Captured", 30, 40, 2),
+    results = iter([Step("Added", 10, 20, 1), None,
                     Step("Edited", 3, 4, 5)])
-    monkeypatch.setattr("clickcue.gui.StepDialog", lambda *args: Mock(result=next(results)))
+
+    def dialog(_parent, _title, prefill=None):
+        result = next(results)
+        if result is None:
+            result = replace(prefill, name="Captured", delay=2)
+        return Mock(result=result)
+
+    monkeypatch.setattr("clickcue.gui.StepDialog", dialog)
     app._add_step()
     app.capture_armed = True
     app._handle_event(("hotkey_capture", 30, 40))
+    assert app.steps[-1] == Step("Captured", 30, 40, 2)
     app.tree.selection_set(app.tree.get_children()[0])
     app._edit_step()
     assert [s.name for s in app.steps] == ["Edited", "B", "C", "D", "E", "Added", "Captured"]
@@ -220,6 +229,7 @@ def test_add_capture_and_edit_round_trip(monkeypatch):
     for _ in range(3):
         app._redo()
     assert [s.name for s in app.steps] == ["Edited", "B", "C", "D", "E", "Added", "Captured"]
+    assert app.steps[-1] == Step("Captured", 30, 40, 2)
 
 
 @pytest.mark.parametrize("boundary", ["new", "open"])
