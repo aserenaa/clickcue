@@ -551,7 +551,8 @@ class ClickCueApp:
 
     def _restore_history(self, source: list[SequenceSnapshot],
                          destination: list[SequenceSnapshot]) -> None:
-        if not source or self.player is not None or self.capture_armed:
+        if (not source or self.player is not None or self.capture_armed
+                or self._preparation is not None):
             return
         destination.append(self._sequence_snapshot())
         steps, selection = source.pop()

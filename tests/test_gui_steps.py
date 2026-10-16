@@ -48,6 +48,7 @@ def editor(selection):
     app.root = Mock()
     app.player = None
     app.capture_armed = False
+    app._preparation = None
     app._undo_history = []
     app._redo_history = []
     app._loading = False
@@ -184,17 +185,19 @@ def test_unchanged_dialog_and_boundary_move_keep_redo_and_clean_state(monkeypatc
     assert [s.name for s in app.steps] == list("AABCDE")
 
 
-@pytest.mark.parametrize("capturing", [False, True])
-def test_history_cannot_change_sequence_during_playback_or_capture(capturing):
+@pytest.mark.parametrize("busy", ["playing", "capturing", "preparing"])
+def test_history_cannot_change_sequence_while_busy(busy):
     app = editor([1])
     app._remove_step()
     edited = app.steps[:]
-    app.capture_armed = capturing
-    app.player = None if capturing else Mock()
+    app.capture_armed = busy == "capturing"
+    app.player = Mock() if busy == "playing" else None
+    app._preparation = Mock() if busy == "preparing" else None
     app._undo()
     assert app.steps == edited
     app.capture_armed = False
     app.player = None
+    app._preparation = None
     app._undo()
     assert [s.name for s in app.steps] == list("ABCDE")
 
