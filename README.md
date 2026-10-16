@@ -47,7 +47,8 @@ for next time. **F6** starts or stops playback even when another app has focus.
 - 🔁 **Loop playback** — run a sequence once, N times, or forever. **F6** starts
   and stops playback globally, even while the target app is in the foreground,
   and interrupts mid-delay. While a step waits, the playback status shows its
-  remaining delay in seconds. The list selects and scrolls to the active step.
+  remaining delay in seconds. The list selects and scrolls when the active step
+  changes; countdown updates leave the list in place.
 - 🪟 **Window anchoring** — a profile records its target window's position and
   size. If the window has moved or been resized at playback time, ClickCue
   moves it back to the recorded bounds (or scales the coordinates when the
