@@ -117,7 +117,7 @@ class Player(threading.Thread):
                 continue
             self._click(step)
 
-    def _guard(self, step: Step) -> bool:
+    def _guard(self, step: Step) -> int | None:
         while self._wait(0):
             with self._condition:
                 if self._paused_at is not None or self._stop_event.is_set():
@@ -127,7 +127,7 @@ class Player(threading.Thread):
             if self.guard is not None:
                 covering = self.guard(step, self._guard_cancelled)
                 if not self._wait(0):
-                    return False
+                    return None
                 # A native lookup may finish after Pause. Recheck on Resume.
                 if generation != self._pause_generation:
                     continue
@@ -136,21 +136,24 @@ class Player(threading.Thread):
                     self.events.put(("blocked", step.name, covering,
                                      step.x, step.y))
                     self.stop()
-                    return False
-            return True
-        return False
+                    return None
+            return generation
+        return None
 
     def _click(self, step: Step) -> None:
-        while self._guard(step):
-            generation = self._pause_generation
+        while True:
+            generation = self._guard(step)
+            if generation is None or not self._wait(0):
+                return
+            # Keep the generation approved by the guard across the handoff.
+            if generation != self._pause_generation:
+                continue
             self._mouse.position = (step.x, step.y)
             if not self._wait(PRESS_HOLD_SECONDS):
                 return
             if generation == self._pause_generation:
                 break
             # Using Resume may move the pointer: recheck and position it again.
-        else:
-            return
         try:
             self._mouse.press(mouse.Button.left)
             self._stop_event.wait(PRESS_HOLD_SECONDS)

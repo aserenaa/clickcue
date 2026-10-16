@@ -238,7 +238,7 @@ def test_pause_freezes_remaining_delay_and_stop_wakes_worker(controller, monkeyp
         player.join(timeout=2)
 
 
-@pytest.mark.parametrize("pause_at", ["guard", "move", "press"])
+@pytest.mark.parametrize("pause_at", ["guard", "handoff", "move", "press"])
 def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
         controller, monkeypatch, pause_at):
     monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
@@ -248,6 +248,7 @@ def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
     guarded = []
     pointer = [None]
     clicked_at = []
+    moved_while_paused = []
 
     def guard(step, _cancelled):
         guarded.append(step.name)
@@ -258,6 +259,8 @@ def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
         return None
 
     def moved(position):
+        if player.paused:
+            moved_while_paused.append(position)
         pointer[0] = position
         if pause_at == "move" and not entered.is_set():
             player.pause()
@@ -277,13 +280,24 @@ def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
     events = queue.Queue()
     player = Player([Step("First", 1, 2, 0), Step("Second", 3, 4, 0)],
                     False, 1, events, guard=guard)
+    if pause_at == "handoff":
+        approve = player._guard
+
+        def pause_after_approval(step):
+            approval = approve(step)
+            if not entered.is_set():
+                player.pause()
+                entered.set()
+            return approval
+
+        monkeypatch.setattr(player, "_guard", pause_after_approval)
     player.start()
     try:
         assert entered.wait(2)
         if pause_at == "press":
             assert released.wait(1)  # Pausing must never leave the button held.
         assert not next_click.wait(0.15)
-        if pause_at == "move":
+        if pause_at in ("handoff", "move"):
             pointer[0] = (999, 999)  # Clicking Resume moved away from the target.
         player.resume()
         player.join(timeout=2)
@@ -291,7 +305,8 @@ def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
         assert controller.press.call_count == 2
         assert controller.release.call_count == 2
         assert clicked_at == [(1, 2), (3, 4)]
-        if pause_at == "guard":
+        assert not moved_while_paused
+        if pause_at in ("guard", "handoff"):
             assert guarded == ["First", "First", "Second"]
         assert list(events.queue)[-1] == ("stopped",)
     finally:
