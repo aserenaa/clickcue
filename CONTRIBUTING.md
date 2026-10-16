@@ -34,8 +34,8 @@ Ruff checks fatal errors, undefined names, bug-prone patterns (`B`), and imports
 (`I`), without requiring formatting changes. Existing import ordering in
 `gui.py` and `platform_support.py`, plus an unused loop variable in
 `platform_support.py`, have narrow per-file exceptions pending source fixes.
-Mypy checks the model, profile persistence, and playback modules, including
-unannotated function bodies, using `types-pynput` for the mouse API. This is an
+Mypy checks the model, profile persistence, playback, and window preparation
+modules, including unannotated function bodies, using `types-pynput` for the mouse API. This is an
 incremental gate; it does not yet require complete annotations or check the GUI
 and platform integrations.
 

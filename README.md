@@ -159,7 +159,7 @@ need their own.
    and hotkeys stay responsive.
 5. Press *▶ Start* or hit **F6**. ClickCue focuses the target window, restores
    its recorded position/size if it moved, then plays the sequence. **F6**
-   stops playback, cancelling a pending click after the guard returns or during
+   stops playback, cancelling a pending click during guard focus retries or during
    the wait before pressing. If the mouse button is already held, stopping
    releases it promptly. A press already being sent to the OS may still occur.
 6. Save the sequence as a profile (*Save As…*) and reload it from the
