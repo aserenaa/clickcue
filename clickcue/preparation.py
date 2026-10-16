@@ -1,8 +1,8 @@
 """Window preparation and click coverage policy, independent of the GUI."""
 
-import time
+import queue
 from dataclasses import dataclass, replace
-from threading import Event
+from threading import Event, Thread
 
 from .models import Step, TargetWindow
 from .platform_support import (
@@ -25,12 +25,18 @@ class PreparationResult:
 class WindowPlayback:
     def __init__(self, anchor: TargetWindow | None):
         self.anchor = anchor
+        self.cancelled = Event()
+
+    def _check_cancelled(self) -> None:
+        if self.cancelled.is_set():
+            raise InterruptedError("Preparation cancelled")
 
     def prepare(self, steps: list[Step]) -> PreparationResult:
         """Focus the target, restore its bounds if possible, and return the
         steps to play — coordinate-adjusted when the window cannot be moved
         back to where the profile was recorded."""
         anchor = self.anchor
+        self._check_cancelled()
         first = next((step for step in steps if not step.wait_only), None)
         if first is None:
             return PreparationResult(list(steps), "Playing waits…")
@@ -40,18 +46,22 @@ class WindowPlayback:
                                                    else "Playing…"))
 
         current = find_window(anchor.app)
+        self._check_cancelled()
         if current is None:
             return PreparationResult(
                 list(steps), "Target unavailable — open, reselect, or clear the target",
                 missing_target=True)
 
         focus_window(current)
+        self._check_cancelled()
         if not anchor.has_bounds or current.same_bounds(anchor):
             return self._verified(anchor, list(steps),
                                   f"Playing on “{anchor.app}”…")
 
         if move_window(anchor):
+            self._check_cancelled()
             restored = find_window(anchor.app)
+            self._check_cancelled()
             if restored and restored.same_bounds(anchor):
                 return self._verified(
                     anchor, list(steps),
@@ -79,7 +89,9 @@ class WindowPlayback:
     def _verified(self, anchor: TargetWindow, steps: list[Step],
                   status: str) -> PreparationResult:
         """Warn when another window still covers the first click point."""
-        time.sleep(0.25)  # let the focus change settle before checking
+        # Let the focus settle, but allow Stop to interrupt this wait.
+        self.cancelled.wait(0.25)
+        self._check_cancelled()
         first = next(step for step in steps if not step.wait_only)
         on_top = window_info_at(first.x, first.y)
         if on_top and on_top.app != anchor.app:
@@ -107,3 +119,25 @@ class WindowPlayback:
                     return None
         return on_top.app if on_top else "no window detected"
 
+
+class PlaybackPreparation(Thread):
+    """Prepare a run snapshot and deliver completion without accessing Tk."""
+
+    def __init__(self, steps: list[Step], anchor: TargetWindow | None,
+                 loop_forever: bool, repetitions: int, events: queue.Queue):
+        super().__init__(daemon=True)
+        self.steps = [replace(step) for step in steps]
+        self.windows = WindowPlayback(replace(anchor) if anchor else None)
+        self.loop_forever = loop_forever
+        self.repetitions = repetitions
+        self.events = events
+        self.result: PreparationResult | None = None
+        self.error: Exception | None = None
+
+    def run(self) -> None:
+        try:
+            self.result = self.windows.prepare(self.steps)
+        except Exception as exc:
+            self.error = exc
+        finally:
+            self.events.put(("prepared", self))
