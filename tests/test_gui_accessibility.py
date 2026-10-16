@@ -123,14 +123,38 @@ def test_large_font_rows_fit_text_and_window_can_grow(app, request):
     app.steps = [Step("Readable row", 0, 0, 1)]
     app._refresh_table(select=0)
     app.root.deiconify()
-    app.root.geometry("1200x1000")
     app.root.update()
     row = app.tree.bbox(app.tree.get_children()[0])
     assert row[3] >= default_font.metrics("linespace") + 4
-    table_height = app.tree.winfo_height()
-    width, height = app.root.winfo_width(), app.root.winfo_height()
-    app.root.geometry(f"{width + 150}x{height + 150}")
-    app.root.update()
-    assert app.tree.winfo_height() > table_height
+
+    # Large fonts may already fill the desktop. Check expansion separately at
+    # the system font, using sizes inside the window manager's available area.
+    default_font.configure(**original)
+    for child in app.root.winfo_children():
+        child.destroy()
+    app._build_ui()
+    width, height = app.root.minsize()
+    max_width, max_height = app.root.maxsize()
+    growth = min(80, (max_height - height) // 2)
+    assert width <= max_width and growth > 0
+    table_heights = []
+    for target_height in (height, height + growth):
+        settled = tk.BooleanVar(master=app.root)
+
+        def configured(event, target_height=target_height, settled=settled):
+            if event.widget == app.root and (event.width, event.height) == (width, target_height):
+                settled.set(True)
+
+        binding = app.root.bind("<Configure>", configured, add="+")
+        deadline = app.root.after(2000, settled.set, True)
+        app.root.geometry(f"{width}x{target_height}")
+        if (app.root.winfo_width(), app.root.winfo_height()) != (width, target_height):
+            app.root.wait_variable(settled)
+        app.root.after_cancel(deadline)
+        app.root.unbind("<Configure>", binding)
+        app.root.update_idletasks()
+        assert (app.root.winfo_width(), app.root.winfo_height()) == (width, target_height)
+        table_heights.append(app.tree.winfo_height())
+    assert table_heights[1] > table_heights[0]
     assert app.start_button.winfo_rooty() + app.start_button.winfo_height() <= (
         app.root.winfo_rooty() + app.root.winfo_height())
