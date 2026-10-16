@@ -4,12 +4,14 @@ from unittest.mock import Mock
 import pytest
 
 from clickcue.gui import ClickCueApp
+from clickcue.hotkeys import HotkeySettings
 from clickcue.models import Step, TargetWindow
 
 
 @pytest.fixture
 def app(monkeypatch):
     app = ClickCueApp.__new__(ClickCueApp)
+    app.hotkeys = HotkeySettings()
     app.player = None
     app.steps = [Step("Click", 17, 29, 0)]
     app.target_window = TargetWindow("Target")
