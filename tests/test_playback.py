@@ -89,7 +89,7 @@ def test_guard_blocks_click_and_stops(controller):
     events = queue.Queue()
     player = Player([Step("Btn", 10, 20, 0.01)], loop_forever=True,
                     repetitions=1, events=events,
-                    guard=lambda _step: "WhatsApp")
+                    guard=lambda _step, _cancelled: "WhatsApp")
     player.start()
     try:
         player.join(timeout=5)
@@ -111,7 +111,7 @@ def test_stop_inside_successful_guard_prevents_click(controller, monkeypatch):
     monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
     events = queue.Queue()
 
-    def guard(_step):
+    def guard(_step, _cancelled):
         player.stop()
         return None
 
@@ -184,7 +184,7 @@ def test_wait_only_step_does_not_guard_or_click_and_continues(controller):
     events = queue.Queue()
     guarded = []
 
-    def guard(step):
+    def guard(step, _cancelled):
         guarded.append(step.name)
         return "outside target" if (step.x, step.y) == (0, 0) else None
 

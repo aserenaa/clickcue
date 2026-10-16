@@ -175,7 +175,7 @@ that do not conflict with shortcuts in your target app or operating system.
    and hotkeys stay responsive.
 5. Press *▶ Start* or hit **F6**. ClickCue focuses the target window, restores
    its recorded position/size if it moved, then plays the sequence. **F6**
-   stops playback, cancelling a pending click after the guard returns or during
+   stops playback, cancelling a pending click during guard focus retries or during
    the wait before pressing. If the mouse button is already held, stopping
    releases it promptly. A press already being sent to the OS may still occur.
 6. Save the sequence as a profile (*Save As…*) and reload it from the
@@ -188,6 +188,13 @@ Profiles are plain JSON files in `~/.clickcue/profiles/`. Save one with
 Saves replace the profile file only after the new data has been written. If a
 save or delete fails, ClickCue shows an error and keeps your current sequence;
 failed saves leave your edits marked as unsaved so you can retry.
+
+The dropdown includes only valid, readable profiles whose names match their
+filenames (using ClickCue's filename sanitization). If a file cannot be listed,
+**Profile errors** shows its filename and reason, including invalid JSON, invalid
+fields, encoding problems, or read permissions. Files are left unchanged. Correct
+the reported files, then click **Profile errors** again to refresh; valid profiles
+remain available while you repair the others.
 
 <details>
 <summary><strong>Profile format and window anchoring</strong></summary>
