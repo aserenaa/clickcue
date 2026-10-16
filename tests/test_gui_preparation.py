@@ -39,6 +39,7 @@ def app(monkeypatch):
     app.run_selected_button = Mock()
     app.pause_button = Mock()
     app._run_indices = None
+    app._pending_control = None
     app.capture_armed = False
     app.repetitions = Mock(get=Mock(return_value="1"))
     app.root.after.side_effect = ui_only

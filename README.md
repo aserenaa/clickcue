@@ -231,6 +231,11 @@ that do not conflict with shortcuts in your target app or operating system.
    mouse press/release) cannot be interrupted and may finish after Pause/Stop.
    These are best-effort controls, not a guarantee that pending native input
    can be recalled. Pause/Resume and Run selected steps add no global hotkeys.
+   Input initiation is synchronized with Pause/Stop. If a native move or press
+   is already executing, the control stays **Pausing…** or **Stopping…** until
+   that call returns and the request is acknowledged. The UI remains responsive;
+   delays and guard queries do not hold the input lock. No new input starts
+   after Pause/Stop is acknowledged (button release still completes cleanup).
 6. Save the sequence as a profile (*Save As…*) and reload it from the
    dropdown. *New* starts a fresh sequence.
 

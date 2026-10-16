@@ -1,6 +1,8 @@
+import threading
+import time
 import tkinter as tk
 from copy import deepcopy
-from unittest.mock import Mock
+from unittest.mock import Mock, PropertyMock
 
 import pytest
 
@@ -64,7 +66,9 @@ def test_busy_callbacks_preserve_editor_and_profile_files(editor, monkeypatch, t
         app.player.paused = False
         if phase == "paused":
             app._toggle_pause()
-            app.player.pause.assert_called_once()
+            app.player.request_control.assert_called_once_with("pause")
+            app.player.paused = True
+            app._handle_event(("controlled", app.player, "pause"))
     before = deepcopy(app.steps)
     files = {p.name: p.read_bytes() for p in app.store.directory.iterdir()}
     changed = Step("Changed", 40, 50, 0)
@@ -140,19 +144,23 @@ def test_controls_stay_locked_until_completion_and_restore(editor, outcome):
         if outcome == "pause_stop":
             app.player.paused = False
             app._toggle_pause()
-            app.player.pause.assert_called_once()
+            app.player.request_control.assert_called_once_with("pause")
+            app.player.paused = True
+            app._handle_event(("controlled", app.player, "pause"))
             assert app.pause_button.cget("text") == "Resume"
             app.player.paused = True
             app._handle_event(("waiting", 1, 0, "First", 1.0))
             assert app.status_text.get().startswith("Paused")
             app._toggle_pause()
-            app.player.resume.assert_called_once()
+            app.player.request_control.assert_called_with("resume")
+            app.player.paused = False
+            app._handle_event(("controlled", app.player, "resume"))
             assert app.pause_button.cget("text") == "Pause"
         if outcome == "play_error":
             app._handle_event(("error", "synthetic failure"))
         if outcome in ("play_stop", "pause_stop"):
             app._toggle_playback()
-            app.player.stop.assert_called_once()
+            app.player.request_control.assert_called_with("stop")
         assert all(w.instate(["disabled"]) for w in controls)
         app._handle_event(("stopped",))
     else:
@@ -274,3 +282,72 @@ def test_run_selected_without_selection_explains_how_to_start(editor):
     from clickcue.gui import messagebox
     messagebox.showinfo.assert_called_once()
     assert "Select one or more steps" in messagebox.showinfo.call_args.args[1]
+
+
+@pytest.mark.parametrize("finish", ["stop", "close"])
+def test_native_input_waits_for_control_ack_without_blocking_tk(editor, monkeypatch, finish):
+    from clickcue.playback import Player
+
+    app = editor
+    entered = threading.Event()
+    release = threading.Event()
+    controller = Mock()
+
+    def move(*_):
+        entered.set()
+        release.wait(3)  # A bounded fallback also exposes a blocking Tk callback.
+
+    type(controller).position = PropertyMock(side_effect=move)
+    monkeypatch.setattr("clickcue.playback.mouse.Controller", lambda: controller)
+    monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
+    monkeypatch.setattr("clickcue.gui.Player", Player)
+    app.target_window = None
+    app._toggle_playback()
+    preparation = app._preparation
+    preparation.result = PreparationResult(preparation.steps, "Playing")
+    app._handle_event(("prepared", preparation))
+    player = app.player
+    try:
+        assert entered.wait(2)
+        started = time.monotonic()
+        app._toggle_pause()
+        assert time.monotonic() - started < 1
+        assert app.status_text.get() == "Pausing…"
+        assert app.pause_button.instate(["disabled"])
+        heartbeat = []
+        app.root.after(0, lambda: heartbeat.append(True))
+        app.root.update()
+        assert heartbeat == [True]
+        assert not player.paused
+        diagnostics = button(app, "Diagnostics")
+        assert diagnostics.instate(["!disabled"])
+        diagnostics.invoke()
+        panel = next(w for w in app.root.winfo_children() if isinstance(w, tk.Toplevel))
+        assert app.root.grab_current() is None
+        panel.destroy()
+        if finish == "close":
+            app.dirty = False
+            app._on_close()
+            assert app._closed
+        else:
+            app._toggle_playback()  # Stop supersedes the outstanding Pause.
+            assert app.status_text.get() == "Stopping…"
+            assert app.run_selected_button.instate(["disabled"])
+        release.set()
+        player.join(timeout=2)
+        assert not player.is_alive()
+        if finish == "stop":
+            app._poll_events()
+            assert app.player is None
+            assert app._pending_control is None
+            assert app.start_button.instate(["!disabled"])
+            assert app.run_selected_button.instate(["!disabled"])
+            assert app.pause_button.instate(["disabled"])
+        # A late acknowledgment cannot affect a stopped or closed app.
+        status = app.status_text.get()
+        app._handle_event(("controlled", player, "pause"))
+        assert app.status_text.get() == status
+    finally:
+        release.set()
+        player.stop()
+        player.join(timeout=2)

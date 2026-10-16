@@ -9,7 +9,7 @@ tuples on the given queue; the GUI consumes them from the Tk main loop.
 import queue
 import threading
 import time
-from typing import Callable
+from typing import Callable, Literal
 
 from pynput import mouse
 
@@ -66,8 +66,16 @@ class Player(threading.Thread):
 
     @property
     def paused(self) -> bool:
-        with self._condition:
-            return self._paused_at is not None
+        # A UI snapshot, not an input admission check: never wait on a backend.
+        return self._paused_at is not None
+
+    def request_control(self, action: Literal["pause", "resume", "stop"]) -> None:
+        """Keep Tk responsive while a synchronized control awaits native input."""
+        def apply() -> None:
+            {"pause": self.pause, "resume": self.resume, "stop": self.stop}[action]()
+            self.events.put(("controlled", self, action))
+
+        threading.Thread(target=apply, daemon=True).start()
 
     def pause(self) -> None:
         with self._condition:
@@ -145,18 +153,30 @@ class Player(threading.Thread):
             generation = self._guard(step)
             if generation is None or not self._wait(0):
                 return
-            # Keep the generation approved by the guard across the handoff.
-            if generation != self._pause_generation:
-                continue
-            self._mouse.position = (step.x, step.y)
+            # Validation and native initiation share the Pause/Stop lock.
+            # Synchronous backends retain it until the call returns; neither
+            # guard queries nor interruptible waits hold it.
+            with self._condition:
+                if self._stop_event.is_set():
+                    return
+                if self._paused_at is not None or generation != self._pause_generation:
+                    continue
+                self._mouse.position = (step.x, step.y)
             if not self._wait(PRESS_HOLD_SECONDS):
                 return
-            if generation == self._pause_generation:
-                break
-            # Using Resume may move the pointer: recheck and position it again.
-        try:
-            self._mouse.press(mouse.Button.left)
-            self._stop_event.wait(PRESS_HOLD_SECONDS)
-        finally:
-            # A backend may send the press before raising an error.
-            self._mouse.release(mouse.Button.left)
+            attempted = False
+            try:
+                with self._condition:
+                    if self._stop_event.is_set():
+                        return
+                    if self._paused_at is not None or generation != self._pause_generation:
+                        # Resume can move the pointer: recheck and reposition.
+                        continue
+                    attempted = True
+                    self._mouse.press(mouse.Button.left)
+                self._stop_event.wait(PRESS_HOLD_SECONDS)
+                return
+            finally:
+                if attempted:
+                    # Release even on Pause/Stop or a partially sent press error.
+                    self._mouse.release(mouse.Button.left)

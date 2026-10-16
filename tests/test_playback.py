@@ -238,7 +238,8 @@ def test_pause_freezes_remaining_delay_and_stop_wakes_worker(controller, monkeyp
         player.join(timeout=2)
 
 
-@pytest.mark.parametrize("pause_at", ["guard", "handoff", "move", "press"])
+@pytest.mark.parametrize("pause_at", ["guard", "handoff", "move", "press",
+                                     "move_gap", "press_gap", "stop_press_gap"])
 def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
         controller, monkeypatch, pause_at):
     monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
@@ -249,6 +250,26 @@ def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
     pointer = [None]
     clicked_at = []
     moved_while_paused = []
+    controlled = threading.Event()
+    operation_started = threading.Event()
+    control_started = threading.Event()
+    ordering = []
+    accesses = 0
+
+    class BoundaryPlayer(Player):
+        def __getattribute__(self, name):
+            nonlocal accesses
+            value = super().__getattribute__(name)
+            if name == "_mouse":
+                accesses += 1
+                if ((pause_at == "move_gap" and accesses == 1)
+                        or (pause_at in ("press_gap", "stop_press_gap") and accesses == 2)):
+                    # The backend operation has not begun: stop between the
+                    # admission check and accessing its controller to initiate it.
+                    entered.set()
+                    assert control_started.wait(2)
+                    controlled.wait(0.2)
+            return value
 
     def guard(step, _cancelled):
         guarded.append(step.name)
@@ -259,15 +280,21 @@ def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
         return None
 
     def moved(position):
+        ordering.append("move")
         if player.paused:
             moved_while_paused.append(position)
         pointer[0] = position
+        if pause_at == "move_gap":
+            operation_started.set()
         if pause_at == "move" and not entered.is_set():
             player.pause()
             entered.set()
 
     def pressed(*_):
+        ordering.append("press")
         clicked_at.append(pointer[0])
+        if pause_at in ("press_gap", "stop_press_gap"):
+            operation_started.set()
         if pause_at == "press" and not entered.is_set():
             player.pause()
             entered.set()
@@ -278,7 +305,7 @@ def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
     controller.press.side_effect = pressed
     controller.release.side_effect = lambda *_: released.set()
     events = queue.Queue()
-    player = Player([Step("First", 1, 2, 0), Step("Second", 3, 4, 0)],
+    player = BoundaryPlayer([Step("First", 1, 2, 0), Step("Second", 3, 4, 0)],
                     False, 1, events, guard=guard)
     if pause_at == "handoff":
         approve = player._guard
@@ -292,8 +319,35 @@ def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
 
         monkeypatch.setattr(player, "_guard", pause_after_approval)
     player.start()
+    control_thread = None
     try:
         assert entered.wait(2)
+        if pause_at.endswith("gap"):
+            def control():
+                control_started.set()
+                if pause_at == "stop_press_gap":
+                    player.stop()
+                else:
+                    player.pause()
+                ordering.append("controlled")
+                controlled.set()
+
+            control_thread = threading.Thread(target=control)
+            control_thread.start()
+            assert controlled.wait(2)
+            assert operation_started.wait(2)
+            # An operation already admitted may finish before acknowledgment;
+            # none may start after Pause/Stop has acknowledged completion.
+            assert ordering[-1] == "controlled"
+            if pause_at == "stop_press_gap":
+                player.join(timeout=2)
+                assert not player.is_alive()
+                assert controller.press.call_count == 1
+                controller.release.assert_called_once()
+                return
+            if pause_at == "press_gap":
+                assert released.wait(1)
+                next_click.clear()
         if pause_at == "press":
             assert released.wait(1)  # Pausing must never leave the button held.
         assert not next_click.wait(0.15)
@@ -312,3 +366,5 @@ def test_pause_at_input_boundary_preserves_cleanup_and_resume_guard(
     finally:
         player.stop()
         player.join(timeout=2)
+        if control_thread is not None:
+            control_thread.join(timeout=2)

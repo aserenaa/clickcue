@@ -173,6 +173,7 @@ class ClickCueApp:
         self.player: Player | None = None
         self._preparation: PlaybackPreparation | None = None
         self._run_indices: list[int] | None = None
+        self._pending_control: str | None = None
         self._closed = False
         self._closing = False
         self.capture_armed = False
@@ -391,7 +392,9 @@ class ClickCueApp:
     def _update_editing_controls(self) -> None:
         state = "disabled" if self._editing_blocked() else "!disabled"
         self.run_selected_button.state([state])
-        self.pause_button.state(["!disabled" if self.player is not None else "disabled"])
+        self.pause_button.state(["!disabled" if self.player is not None
+                                 and self._pending_control is None
+                                 and not self._closing else "disabled"])
         if self.player is None:
             self.pause_button.configure(text="Pause")
         for widget in self._editing_controls:
@@ -539,13 +542,23 @@ class ClickCueApp:
             self.status_text.set(self._last_stop)
         elif kind == "hotkey_toggle":
             self._toggle_playback()
+        elif kind == "controlled":
+            _, player, action = event
+            if (self._closed or self._closing or player is not self.player
+                    or action != self._pending_control or action == "stop"):
+                return
+            self._pending_control = None
+            self._update_editing_controls()
+            self.pause_button.configure(text="Resume" if player.paused else "Pause")
+            self.status_text.set("Paused — Resume to continue or Stop to cancel"
+                                 if player.paused else "Resuming…")
         elif kind == "hotkey_capture":
             if self.capture_armed and not self._editing_blocked():
                 self.capture_armed = False
                 self._refresh_target_bounds()
                 self._add_step(prefill=Step("New step", event[1], event[2], 1.0))
         elif kind in ("waiting", "playing"):
-            if self.player is not None and self.player.paused:
+            if self._pending_control is not None or (self.player is not None and self.player.paused):
                 return
             _, repetition, index, name = event[:4]
             if self._run_indices is not None:
@@ -558,10 +571,11 @@ class ClickCueApp:
             self._highlight_step(index)
         elif kind == "stopped":
             self.player = None
+            self._pending_control = None
             self._run_indices = None
             self._run_settings = None
             self._update_editing_controls()
-            self.start_button.configure(text=f"▶ Start ({self.hotkeys.toggle})")
+            self.start_button.configure(text=f"▶ Start ({self.hotkeys.toggle})", state="normal")
             self.status_text.set(self._blocked_status or "Stopped")
             self._last_stop = self._blocked_status or "Stopped (completion or cancellation)"
             self._blocked_status = None
@@ -666,7 +680,7 @@ class ClickCueApp:
             self.status_text.set("Cancelling preparation…")
             return
         if self.player is not None:
-            self.player.stop()
+            self._request_player_control("stop")
             return
         self._start_playback()
 
@@ -675,16 +689,21 @@ class ClickCueApp:
             self._start_playback(selected_only=True)
 
     def _toggle_pause(self) -> None:
-        if self._closed or self._closing or self.player is None:
+        if (self._closed or self._closing or self.player is None
+                or self._pending_control is not None):
             return
-        if self.player.paused:
-            self.player.resume()
-            self.pause_button.configure(text="Pause")
-            self.status_text.set("Resuming…")
-        else:
-            self.player.pause()
-            self.pause_button.configure(text="Resume")
-            self.status_text.set("Paused — Resume to continue or Stop to cancel")
+        self._request_player_control("resume" if self.player.paused else "pause")
+
+    def _request_player_control(self, action: str) -> None:
+        if self._pending_control == "stop":
+            return
+        self._pending_control = action
+        self.pause_button.state(["disabled"])
+        if action == "stop":
+            self.start_button.configure(text="Stopping…", state="disabled")
+        self.status_text.set({"pause": "Pausing…", "resume": "Resuming…",
+                              "stop": "Stopping…"}[action])
+        self.player.request_control(action)
 
     def _start_playback(self, selected_only: bool = False) -> None:
         if (self._closing or self._preview_active
@@ -1205,7 +1224,7 @@ class ClickCueApp:
             self._preparation.windows.cancelled.set()
             self._preparation = None
         if self.player is not None:
-            self.player.stop()
+            self.player.request_control("stop")
         if self.keyboard_listener is not None:
             self.keyboard_listener.stop()
         self.root.destroy()

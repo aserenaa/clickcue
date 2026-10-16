@@ -144,9 +144,14 @@ def test_large_font_rows_fit_text_and_window_can_grow(app, request):
         row = app.tree.bbox(app.tree.get_children()[0])
         assert row and row[1] + row[3] <= app.tree.winfo_height()
         table_heights.append(app.tree.winfo_height())
+        diagnostics = next(w for w in app.start_button.master.winfo_children()
+                           if w.cget("text").startswith("Diagnostics"))
+        for control in (app.start_button, diagnostics, app.run_selected_button, app.pause_button):
+            assert control.winfo_ismapped()
+            assert control.winfo_rooty() >= app.root.winfo_rooty()
+            assert control.winfo_rooty() + control.winfo_height() <= (
+                app.root.winfo_rooty() + app.root.winfo_height())
     assert table_heights[1] > table_heights[0]
-    assert app.start_button.winfo_rooty() + app.start_button.winfo_height() <= (
-        app.root.winfo_rooty() + app.root.winfo_height())
 
     default_font.configure(size=18)
     # Rebuild after choosing a system font size, as at application startup.
