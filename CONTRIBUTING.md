@@ -11,17 +11,47 @@ instructions in [README.md](README.md#installation), activate that environment,
 then install development tools:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install --require-hashes -r requirements-dev.txt
+python -m pip install --no-deps --no-build-isolation -e .
 python -m pytest -q
 python -m ruff check .
+python -m mypy
 python -m pip_audit --skip-editable
-python -m build
+python -m build --no-isolation
 python -m twine check --strict dist/*
 ```
 
-Run these commands with the virtual environment active. CI tests Python 3.10
-and 3.14 on macOS, Windows, and Linux. These are automated unit tests, not a
+Run these commands with the virtual environment active. The generated
+`requirements-dev.txt` pins runtime, development, and build dependencies with
+hashes and platform/Python markers. Install it before the editable project;
+`--no-deps --no-build-isolation` keeps that install on the pinned dependencies.
+CI uses this set on Python 3.10 and 3.14 on macOS, Windows, and Linux. A separate
+Ubuntu job installs the newest compatible `.[dev]` dependencies on both Python
+versions, so the pins cannot conceal incompatibilities. These are unit tests, not a
 certification of GUI, permissions, or window behavior on every OS.
+
+Ruff checks fatal errors, undefined names, bug-prone patterns (`B`), and imports
+(`I`), without requiring formatting changes. Existing import ordering in
+`gui.py` and `platform_support.py`, plus an unused loop variable in
+`platform_support.py`, have narrow per-file exceptions pending source fixes.
+Mypy checks the model, profile persistence, and playback modules, including
+unannotated function bodies, using `types-pynput` for the mouse API. This is an
+incremental gate; it does not yet require complete annotations or check the GUI
+and platform integrations.
+
+When changing dependencies, edit `pyproject.toml` and regenerate the pinned set
+with the recorded resolver version (the universal resolution covers Python
+3.10+ and all platforms):
+
+```bash
+python -m pip install uv==0.13.1
+python -m uv pip compile pyproject.toml --extra dev --universal --python-version 3.10 --generate-hashes --output-file requirements-dev.txt
+```
+
+Add `--upgrade` to refresh all pins deliberately. Review the generated diff,
+then repeat the install and validation commands above in a fresh environment.
+Keep the lower bounds in `.[dev]`; the newest-dependencies job intentionally
+does not use the pinned file.
 
 ## Testing without real clicks
 
