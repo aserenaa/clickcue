@@ -83,12 +83,12 @@ def test_anchored_preparation_restores_or_scales_without_changing_saved_steps(
         preparation["move_window"].assert_called_once_with(anchor)
 
 
-def test_missing_target_surfaces_absolute_fallback_for_gui_decision(preparation):
+def test_missing_target_reports_unavailable_without_focusing(preparation):
     steps = [Step("Click", 125, 250, 0)]
     result = WindowPlayback(TargetWindow("Target")).prepare(steps)
     assert result.missing_target
     assert result.steps == steps
-    assert result.status == "Playing (target window not found)…"
+    assert result.status == "Target unavailable — open, reselect, or clear the target"
     preparation["focus_window"].assert_not_called()
     preparation["window_info_at"].assert_not_called()
 

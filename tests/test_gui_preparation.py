@@ -1,5 +1,6 @@
 import queue
 import threading
+from copy import deepcopy
 from unittest.mock import Mock
 
 import pytest
@@ -36,6 +37,10 @@ def app(monkeypatch):
     app.status_text = Mock()
     app.status_text.set.side_effect = ui_only
     app.dirty = False
+    app._mark_dirty = Mock()
+    app._update_target_text = Mock()
+    for name in ("find_window", "focus_window_at", "focus_window", "window_info_at"):
+        monkeypatch.setattr(f"clickcue.preparation.{name}", Mock(return_value=None))
     app.keyboard_listener = None
     monkeypatch.setattr("clickcue.gui.messagebox.askyesno", Mock(return_value=True))
     monkeypatch.setattr("clickcue.gui.messagebox.showerror", Mock(side_effect=ui_only))
@@ -47,28 +52,56 @@ def app(monkeypatch):
     return app
 
 
-@pytest.mark.parametrize("accept", [False, True])
-def test_missing_target_requires_gui_decision_before_start(app, monkeypatch, accept):
-    monkeypatch.setattr("clickcue.preparation.find_window", Mock(return_value=None))
-    ui_thread = threading.current_thread()
-
-    def decide(*args):
-        assert threading.current_thread() is ui_thread
-        return accept
-
-    decision = Mock(side_effect=decide)
+def test_missing_target_blocks_playback_without_changing_saved_state(monkeypatch, app):
+    steps = deepcopy(app.steps)
+    anchor = deepcopy(app.target_window)
+    decision = Mock(return_value=True)
     monkeypatch.setattr("clickcue.gui.messagebox.askyesno", decision)
+    warning = Mock()
+    monkeypatch.setattr("clickcue.gui.messagebox.showwarning", warning)
+    player = Mock()
+    monkeypatch.setattr("clickcue.gui.Player", player)
+
     app._toggle_playback()
     app._handle_event(app.events.get(timeout=2))
 
-    decision.assert_called_once()
-    assert "saved absolute coordinates" in decision.call_args.args[1]
-    if accept:
-        app.player.start.assert_called_once()
-        app.status_text.set.assert_called_with("Playing (target window not found)…")
+    assert app.player is None
+    player.assert_not_called()
+    decision.assert_not_called()
+    warning.assert_called_once()
+    assert "Target" in warning.call_args.args[1]
+    for action in ("Open", "Choose", "Clear"):
+        assert action in warning.call_args.args[1]
+    assert "target unavailable" in app.status_text.set.call_args.args[0].lower()
+    assert app.steps == steps
+    assert app.target_window == anchor
+    app._mark_dirty.assert_not_called()
+    app._update_target_text.assert_not_called()
+    assert app._preparation is None
+    app.start_button.configure.assert_called_with(
+        text=f"\u25b6 Start ({app.hotkeys.toggle})", state="normal")
+
+
+@pytest.mark.parametrize("wait_only", [False, True])
+def test_clear_anchor_or_wait_only_sequence_can_start(monkeypatch, app, wait_only):
+    if wait_only:
+        app.steps = [Step("Pause", 17, 29, 1, wait_only=True)]
     else:
-        assert app.player is None
-        app.status_text.set.assert_called_with("Stopped")
+        app._clear_target_window()
+    warning = Mock()
+    monkeypatch.setattr("clickcue.gui.messagebox.showwarning", warning)
+    player = Mock()
+    monkeypatch.setattr("clickcue.gui.Player", player)
+
+    app._toggle_playback()
+    app._handle_event(app.events.get(timeout=2))
+
+    warning.assert_not_called()
+    assert app.player is player.return_value
+    app.player.start.assert_called_once()
+    assert player.call_args.args[0] == app.steps
+    assert app.status_text.set.call_args.args[0] == (
+        "Playing waits…" if wait_only else "Playing…")
 
 
 @pytest.mark.parametrize("action", ["stop", "close", "error", "snapshot"])
@@ -86,7 +119,7 @@ def test_blocked_preparation_keeps_ui_responsive_and_discards_cancelled_results(
         assert release.wait(2), "test did not release blocked OS call"
         if action == "error" and len(calls) == 1:
             raise RuntimeError("OS failure")
-        return None
+        return TargetWindow(name)
 
     monkeypatch.setattr("clickcue.preparation.find_window", find_window)
     player = Mock()

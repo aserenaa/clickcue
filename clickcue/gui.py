@@ -499,17 +499,23 @@ class ClickCueApp:
             accepted = False
             messagebox.showerror("Preparation failed", str(preparation.error))
         if accepted and prepared is not None and prepared.missing_target:
-            accepted = messagebox.askyesno(
-                "Target window not found",
+            accepted = False
+            self.status_text.set(prepared.status)
+            messagebox.showwarning(
+                "Target window unavailable",
                 f"No window of “{windows.anchor.app}” is open.\n\n"
-                "Play with the saved absolute coordinates anyway?")
+                "Open the target app and try again, use Target window → "
+                "Choose… to reselect it, or Clear the target to play with "
+                "saved absolute coordinates.")
         # Dialogs run a nested Tk loop; Stop or Close may have occurred there.
         if self._closed or preparation is not self._preparation:
             return
         self._preparation = None
         self.start_button.configure(text=f"▶ Start ({self.hotkeys.toggle})", state="normal")
         if not accepted or windows.cancelled.is_set() or prepared is None:
-            self.status_text.set("Stopped")
+            self.status_text.set(
+                prepared.status if prepared is not None and prepared.missing_target
+                and not windows.cancelled.is_set() else "Stopped")
             return
         self._blocked_status = None
         self.player = Player(prepared.steps, preparation.loop_forever,

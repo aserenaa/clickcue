@@ -183,6 +183,10 @@ that do not conflict with shortcuts in your target app or operating system.
    cancelling prevents playback even if an OS window call finishes later.
    OS window calls cannot be interrupted, so another Start becomes available
    once the pending call returns. Changes in the editor apply to the next run.
+   If the saved target is unavailable, click playback stays stopped: open the
+   target app, reselect it with *Target window → Choose…*, or use *Clear* to
+   explicitly play with saved absolute coordinates. This leaves your steps
+   unchanged. Wait-only sequences can play even when the target is unavailable.
 6. Save the sequence as a profile (*Save As…*) and reload it from the
    dropdown. *New* starts a fresh sequence.
 
