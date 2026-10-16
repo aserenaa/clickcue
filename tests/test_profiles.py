@@ -1,3 +1,4 @@
+import json
 import os
 
 import pytest
@@ -132,3 +133,70 @@ def test_target_window_bounds_helpers():
     assert not saved.same_bounds(TargetWindow("Game", 0, 0, 200, 100))
     assert not saved.same_bounds(TargetWindow("Game"))
     assert not TargetWindow("Game").has_bounds
+
+
+@pytest.mark.parametrize(("data", "field"), [
+    ([], "profile"),
+    ({}, "name"),
+    ({"name": " "}, "name"),
+    ({"name": "Test", "steps": {}}, "steps"),
+    ({"name": "Test", "steps": None}, "steps"),
+    ({"name": "Test", "steps": [None]}, "steps\\[1\\]"),
+    ({"name": "Test", "steps": [{}]}, "steps\\[1\\].name"),
+    *[({"name": "Test", "loop_forever": value}, "loop_forever")
+      for value in ("false", 0, None)],
+    *[({"name": "Test", "repetitions": value}, "repetitions")
+      for value in (0, -1, 1.5, True, "2", None)],
+    *[({"name": "Test", "target_window": value}, "target_window")
+      for value in ([], {}, "Game", {"app": " "},
+                    {"app": "Game", "x": 0},
+                    {"app": "Game", "x": 0, "y": 0, "width": 0, "height": 1},
+                    {"app": "Game", "x": 0, "y": 0, "width": 1, "height": -1},
+                    {"app": "Game", "x": 0.5, "y": 0, "width": 1, "height": 1},
+                    {"app": "Game", "x": 0, "y": 0, "width": True, "height": 1},
+                    {"app": "Game", "extra": 1})],
+    ({"name": "Test", "target_app": " "}, "target_app"),
+])
+def test_load_rejects_invalid_profile_fields(tmp_path, data, field):
+    (tmp_path / "Test.json").write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match=field):
+        ProfileStore(tmp_path).load("Test")
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("name", " "), ("name", None),
+    ("x", 1.5), ("x", True), ("x", "1"), ("y", None),
+    ("delay", float("nan")), ("delay", float("inf")),
+    ("delay", float("-inf")), ("delay", -0.1),
+    ("delay", True), ("delay", "1"),
+    ("delay", 10 ** 400),
+    ("wait_only", "false"), ("wait_only", 0),
+])
+def test_load_rejects_invalid_step_fields(tmp_path, field, value):
+    step = {"name": "Click", "x": -10, "y": 20, "delay": 0}
+    step[field] = value
+    data = {"name": "Test", "steps": [step]}
+    (tmp_path / "Test.json").write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match=rf"steps\[1\].{field}"):
+        ProfileStore(tmp_path).load("Test")
+
+
+def test_load_negative_coordinates_and_explicit_false():
+    profile = Profile.from_dict({
+        "name": "Secondary screen", "loop_forever": False,
+        "target_window": {"app": "Game", "x": -100, "y": -20,
+                          "width": 100, "height": 50},
+        "steps": [{"name": "Click", "x": -10, "y": -5, "delay": 0,
+                   "wait_only": False}],
+    })
+    assert profile.loop_forever is False
+    assert profile.steps == [Step("Click", -10, -5, 0, False)]
+    assert profile.target_window == TargetWindow("Game", -100, -20, 100, 50)
+
+
+def test_load_name_only_profile_and_app_only_target():
+    assert Profile.from_dict({"name": "Minimal"}) == Profile("Minimal")
+    assert Profile.from_dict({
+        "name": "App", "target_window": {"app": "Game", "x": None,
+                                          "y": None, "width": None, "height": None},
+    }).target_window == TargetWindow("Game")
