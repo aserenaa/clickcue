@@ -27,6 +27,7 @@ def test_save_and_load_round_trip(tmp_path):
 
     loaded = store.load(profile.name)
     assert loaded == profile
+    assert json.loads((tmp_path / f"{profile.name}.json").read_text())["schema_version"] == 1
 
 
 def test_save_supports_long_filename_accepted_by_filesystem(tmp_path):
@@ -193,6 +194,8 @@ def test_target_window_bounds_helpers():
 @pytest.mark.parametrize(("data", "field"), [
     ([], "profile"),
     ({}, "name"),
+    *[({"name": "Test", "schema_version": value}, "schema_version")
+      for value in (-1, True, 1.0, "1", None, 2)],
     ({"name": " "}, "name"),
     ({"name": "Test", "steps": {}}, "steps"),
     ({"name": "Test", "steps": None}, "steps"),

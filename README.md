@@ -189,6 +189,18 @@ Saves replace the profile file only after the new data has been written. If a
 save or delete fails, ClickCue shows an error and keeps your current sequence;
 failed saves leave your edits marked as unsaved so you can retry.
 
+Use **Import…** to open an external JSON profile as an unsaved editor copy;
+the filename need not match its profile name. ClickCue validates the complete
+file before asking to discard unsaved edits. Use **Save** or **Save As…** to
+choose a local name afterward; replacing an existing local file requires
+confirmation. Import itself does not write any local profile.
+
+Use **Export…** to write the current sequence, loop settings, and target window
+to a chosen JSON file, including unsaved edits. Export leaves the active local
+profile and unsaved marker unchanged. The native save dialog confirms replacing
+an existing file; export uses the same atomic replacement as local saves, so a
+failed write leaves the previous file intact.
+
 The dropdown includes only valid, readable profiles whose names match their
 filenames (using ClickCue's filename sanitization). If a file cannot be listed,
 **Profile errors** shows its filename and reason, including invalid JSON, invalid
@@ -201,6 +213,7 @@ remain available while you repair the others.
 
 ```json
 {
+  "schema_version": 1,
   "name": "Game A - farming",
   "loop_forever": true,
   "repetitions": 1,
@@ -234,6 +247,10 @@ Target bounds must either all be absent/null or include integer `x`, `y`,
 `width`, and `height`, with positive dimensions. Legacy `target_app` profiles
 remain supported; missing loop settings default to looping forever with a
 repeat count of 1, and missing steps default to an empty list.
+New saves and exports include `schema_version: 1`. Unversioned files and
+version `0` remain supported with the same legacy defaults. The version must
+be a nonnegative JSON integer (not a boolean); newer unsupported versions
+are rejected with an error rather than interpreted as an older format.
 
 </details>
 
