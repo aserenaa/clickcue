@@ -49,6 +49,10 @@ def test_profile_io_error_keeps_editor_state(action, monkeypatch):
     inferred_target = TargetWindow("Synthetic Game", 0, 0, 800, 600)
     original_target = inferred_target if action == "delete" else None
     app = ClickCueApp.__new__(ClickCueApp)
+    app.player = None
+    app._preparation = None
+    app._closed = False
+    app._closing = False
     app.root = Mock()
     app.store = Mock()
     app.store.exists.return_value = False
@@ -112,6 +116,10 @@ def test_profile_io_error_keeps_editor_state(action, monkeypatch):
 @pytest.fixture
 def transfer_editor(tmp_path, monkeypatch):
     app = ClickCueApp.__new__(ClickCueApp)
+    app.player = None
+    app._preparation = None
+    app._closed = False
+    app._closing = False
     app._undo_history = []
     app._redo_history = []
     app.root = Mock()

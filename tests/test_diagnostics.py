@@ -10,7 +10,7 @@ from clickcue.models import TargetWindow
 from clickcue.profiles import ProfileStore
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def tk_runtime():
     try:
         root = tk.Tk()
