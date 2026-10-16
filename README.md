@@ -198,6 +198,12 @@ that do not conflict with shortcuts in your target app or operating system.
    one click or a positive delay; a sequence of only zero-delay waits is rejected.
    During fast playback, the status shows the latest progress update so controls
    and hotkeys stay responsive.
+   To run only part of the sequence, select one or more rows and choose
+   **Run selected steps**. The selected steps run in sequence order with the
+   same repeat/loop settings, target preparation, and click guard as Start.
+   Selection is captured when you start; later selection changes do not change
+   the run. Progress highlights the original rows and shows their original step
+   numbers. Stored steps, profiles, and undo/redo history are unchanged.
 5. Press *▶ Start* or hit **F6**. ClickCue focuses the target window, restores
    its recorded position/size if it moved, then plays the sequence. **F6**
    stops playback, cancelling a pending click during guard focus retries or during
@@ -220,6 +226,21 @@ that do not conflict with shortcuts in your target app or operating system.
    target app, reselect it with *Target window → Choose…*, or use *Clear* to
    explicitly play with saved absolute coordinates. This leaves your steps
    unchanged. Wait-only sequences can play even when the target is unavailable.
+   During playback, choose **Pause** to suspend the next input operation and
+   freeze the remaining step delay; **Resume** continues that run. Pause is
+   available after target preparation finishes. Editing and repeat settings
+   remain locked while paused, and **Stop/F6** cancels immediately without
+   requiring Resume. A held mouse button is released even while paused.
+   Pause interrupts guard retry waits; Resume rechecks coverage before clicking.
+   An OS operation already in flight (including pointer movement, focus, or a
+   mouse press/release) cannot be interrupted and may finish after Pause/Stop.
+   These are best-effort controls, not a guarantee that pending native input
+   can be recalled. Pause/Resume and Run selected steps add no global hotkeys.
+   Input initiation is synchronized with Pause/Stop. If a native move or press
+   is already executing, the control stays **Pausing…** or **Stopping…** until
+   that call returns and the request is acknowledged. The UI remains responsive;
+   delays and guard queries do not hold the input lock. No new input starts
+   after Pause/Stop is acknowledged (button release still completes cleanup).
 6. Save the sequence as a profile (*Save As…*) and reload it from the
    dropdown. *New* starts a fresh sequence.
 
