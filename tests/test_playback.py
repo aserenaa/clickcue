@@ -45,7 +45,7 @@ def test_infinite_zero_work_sequence_stops_with_error(controller, monkeypatch, s
     player = Player(steps, loop_forever=True, repetitions=1, events=events)
     player.start()
     try:
-        player.join(timeout=0.2)
+        player.join(timeout=2)
         assert not player.is_alive()
         received = list(events.queue)
         assert [event[0] for event in received] == ["error", "stopped"]

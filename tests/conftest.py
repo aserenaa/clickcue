@@ -19,3 +19,17 @@ def tk_runtime():
     root.withdraw()
     yield root
     root.destroy()
+
+
+def pytest_addoption(parser):
+    parser.addoption("--fail-on-skip", action="store_true",
+                     help="Fail skipped tests when CI promises a working Tk display")
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    report = yield
+    if report.skipped and item.config.getoption("--fail-on-skip"):
+        report.outcome = "failed"
+        report.longrepr = f"Skipped test forbidden by --fail-on-skip: {report.longrepr}"
+    return report

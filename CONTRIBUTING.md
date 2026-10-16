@@ -27,8 +27,21 @@ hashes and platform/Python markers. Install it before the editable project;
 `--no-deps --no-build-isolation` keeps that install on the pinned dependencies.
 CI uses this set on Python 3.10 and 3.14 on macOS, Windows, and Linux. A separate
 Ubuntu job installs the newest compatible `.[dev]` dependencies on both Python
-versions, so the pins cannot conceal incompatibilities. These are unit tests, not a
-certification of GUI, permissions, or window behavior on every OS.
+versions, so the pins cannot conceal incompatibilities. Both Ubuntu jobs run the
+existing suite under Xvfb with `--fail-on-skip`: a Tk fixture that cannot open a
+display fails the job instead of silently skipping its GUI contracts. To repeat
+that run on Linux, install Xvfb and xauth, then use
+`xvfb-run -a python -m pytest -q --fail-on-skip`. Local runs and the macOS/Windows
+jobs still allow skips when Tk is unavailable; use `python -m pytest -q -rs` to
+see the reasons.
+
+Real Tk tests cover modal event handling and widget behavior. The dummy input
+backend and synthetic OS APIs do not verify global hooks, native focus/movement,
+window stacking, DPI/multiple monitors, or macOS Accessibility permissions.
+Those still need manual checks on Windows and macOS with a harmless target:
+record OS/Python versions, verify Stop during preparation and playback, and
+verify a covered or missing target prevents clicks. Never treat a green unit
+test matrix as native desktop certification.
 
 Ruff checks fatal errors, undefined names, bug-prone patterns (`B`), and imports
 (`I`), without requiring formatting changes. Existing import ordering in
