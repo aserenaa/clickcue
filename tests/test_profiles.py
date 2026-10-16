@@ -57,7 +57,7 @@ def test_filenames_are_sanitized(tmp_path):
 
 def test_load_defaults_for_missing_fields(tmp_path):
     store = ProfileStore(tmp_path)
-    (tmp_path / "minimal.json").write_text('{"name": "Minimal", "steps": []}')
+    (tmp_path / "Minimal.json").write_text('{"name": "Minimal", "steps": []}')
 
     profile = store.load("Minimal")
     assert profile.loop_forever is True
@@ -67,7 +67,7 @@ def test_load_defaults_for_missing_fields(tmp_path):
 
 def test_load_legacy_target_app(tmp_path):
     store = ProfileStore(tmp_path)
-    (tmp_path / "legacy.json").write_text(
+    (tmp_path / "Legacy.json").write_text(
         '{"name": "Legacy", "target_app": "Old Game", "steps": []}')
 
     profile = store.load("Legacy")
