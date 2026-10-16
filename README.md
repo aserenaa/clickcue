@@ -248,7 +248,8 @@ Profile and hotkey dropdowns use native Tk keyboard selection. Native file and
 confirmation dialogs follow the operating system's keyboard conventions.
 
 The main window, step editor, target picker, and preview can be enlarged.
-Minimum sizes use the controls' requested size; table row heights follow the
+Minimum sizes keep the controls visible while letting the table shrink to a
+small viewport; table row heights follow the
 theme font at startup. Status and help text wrap with the window, and help text
 uses the theme foreground. Playback state and errors are written as text, not
 only indicated by color. Preview markers have step numbers and an equivalent

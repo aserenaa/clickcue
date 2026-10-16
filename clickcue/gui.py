@@ -277,7 +277,8 @@ class ClickCueApp:
         style = ttk.Style(self.root)
         tree_font = font.Font(root=self.root,
                               font=style.lookup("Treeview", "font") or "TkDefaultFont")
-        style.configure("Treeview", rowheight=tree_font.metrics("linespace") + 8)
+        row_height = tree_font.metrics("linespace") + 8
+        style.configure("Treeview", rowheight=row_height)
         for column, heading, width in [("index", "#", 36),
                                        ("name", "Name", 220),
                                        ("action", "Action", 60),
@@ -295,7 +296,10 @@ class ClickCueApp:
         for key in ("Up", "Down", "space", "a"):
             self.tree.bind(f"<Control-{key}>", self._step_selection_shortcut)
 
-        step_bar = ttk.Frame(main)
+        # Allocate fixed controls first, retaining the table's earlier Tab order.
+        footer = ttk.Frame(main)
+        footer.pack(side="bottom", fill="x", before=table_frame)
+        step_bar = ttk.Frame(footer)
         step_bar.pack(fill="x", pady=(8, 0))
         self.capture_button = ttk.Button(
             step_bar, text=f"Capture ({self.hotkeys.capture})",
@@ -308,7 +312,7 @@ class ClickCueApp:
             ttk.Button(step_bar, text=label, command=command).pack(
                 side="left", padx=(0, 4))
 
-        history_bar = ttk.Frame(main)
+        history_bar = ttk.Frame(footer)
         history_bar.pack(fill="x", pady=(4, 0))
         for label, command in [("Move up", lambda: self._move_step(-1)),
                                ("Move down", lambda: self._move_step(1)),
@@ -316,7 +320,7 @@ class ClickCueApp:
             ttk.Button(history_bar, text=label, command=command).pack(
                 side="left", padx=(0, 4))
 
-        loop_bar = ttk.LabelFrame(main, text="Playback", padding=8)
+        loop_bar = ttk.LabelFrame(footer, text="Playback", padding=8)
         loop_bar.pack(fill="x", pady=(10, 0))
         ttk.Radiobutton(loop_bar, text="Loop forever",
                         variable=self.loop_forever, value=True).pack(side="left")
@@ -326,7 +330,7 @@ class ClickCueApp:
                     width=6).pack(side="left")
         ttk.Label(loop_bar, text="times").pack(side="left", padx=(4, 0))
 
-        control_bar = ttk.Frame(main)
+        control_bar = ttk.Frame(footer)
         control_bar.pack(fill="x", pady=(10, 0))
         self.start_button = ttk.Button(control_bar, text=f"▶ Start ({self.hotkeys.toggle})",
                                        command=self._toggle_playback)
@@ -335,12 +339,12 @@ class ClickCueApp:
                    command=self._preview_sequence).pack(side="left", padx=(6, 0))
         ttk.Button(control_bar, text="Diagnostics…",
                    command=self._show_diagnostics).pack(side="left", padx=(6, 0))
-        status_label = ttk.Label(main, textvariable=self.status_text, wraplength=580)
+        status_label = ttk.Label(footer, textvariable=self.status_text, wraplength=580)
         status_label.pack(fill="x", pady=(6, 0))
         status_label.bind("<Configure>", lambda event:
                           status_label.configure(wraplength=max(1, event.width)))
 
-        hotkey_bar = ttk.LabelFrame(main, text="Global hotkeys (this machine)", padding=8)
+        hotkey_bar = ttk.LabelFrame(footer, text="Global hotkeys (this machine)", padding=8)
         hotkey_bar.pack(fill="x", pady=(10, 0))
         self.toggle_key = tk.StringVar(value=self.hotkeys.toggle)
         self.capture_key = tk.StringVar(value=self.hotkeys.capture)
@@ -352,12 +356,15 @@ class ClickCueApp:
         self.hotkey_apply_button = ttk.Button(
             hotkey_bar, text="Apply", command=self._apply_hotkeys)
         self.hotkey_apply_button.pack(side="left")
-        self.hotkey_hint = ttk.Label(main, text=self._hint_text(), wraplength=580)
+        self.hotkey_hint = ttk.Label(footer, text=self._hint_text(), wraplength=580)
         self.hotkey_hint.pack(fill="x", pady=(10, 0))
         self.hotkey_hint.bind("<Configure>", lambda event:
                               self.hotkey_hint.configure(wraplength=max(1, event.width)))
         self.root.update_idletasks()
-        self.root.minsize(max(620, main.winfo_reqwidth()), main.winfo_reqheight())
+        # Keep controls and a small table viewport available on smaller displays.
+        spare_rows = int(self.tree.cget("height")) - 1
+        self.root.minsize(max(620, main.winfo_reqwidth()),
+                          main.winfo_reqheight() - spare_rows * row_height)
 
         # Keep read-only export, profile diagnostics, and the control bar usable.
         editing_bars = (profile_controls, target_bar, step_bar, history_bar,

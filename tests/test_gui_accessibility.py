@@ -115,30 +115,17 @@ def test_large_font_rows_fit_text_and_window_can_grow(app, request):
     default_font = font.nametofont("TkDefaultFont", root=app.root)
     original = default_font.actual()
     request.addfinalizer(lambda: default_font.configure(**original))
-    default_font.configure(size=18)
-    # Rebuild after choosing a system font size, as at application startup.
-    for child in app.root.winfo_children():
-        child.destroy()
-    app._build_ui()
     app.steps = [Step("Readable row", 0, 0, 1)]
     app._refresh_table(select=0)
     app.root.deiconify()
     app.root.update()
-    row = app.tree.bbox(app.tree.get_children()[0])
-    assert row[3] >= default_font.metrics("linespace") + 4
-
-    # Large fonts may already fill the desktop. Check expansion separately at
-    # the system font, using sizes inside the window manager's available area.
-    default_font.configure(**original)
-    for child in app.root.winfo_children():
-        child.destroy()
-    app._build_ui()
-    width, height = app.root.minsize()
-    max_width, max_height = app.root.maxsize()
-    growth = min(80, (max_height - height) // 2)
-    assert width <= max_width and growth > 0
+    # Resize between the minimum and an actual mapped size accepted by the WM.
+    # Do this before the large-font rebuild can change the window constraints.
+    width, expanded_height = app.root.winfo_width(), app.root.winfo_height()
+    minimum_height = app.root.minsize()[1]
+    assert minimum_height < expanded_height
     table_heights = []
-    for target_height in (height, height + growth):
+    for target_height in (minimum_height, expanded_height):
         settled = tk.BooleanVar(master=app.root)
 
         def configured(event, target_height=target_height, settled=settled):
@@ -154,7 +141,20 @@ def test_large_font_rows_fit_text_and_window_can_grow(app, request):
         app.root.unbind("<Configure>", binding)
         app.root.update_idletasks()
         assert (app.root.winfo_width(), app.root.winfo_height()) == (width, target_height)
+        row = app.tree.bbox(app.tree.get_children()[0])
+        assert row and row[1] + row[3] <= app.tree.winfo_height()
         table_heights.append(app.tree.winfo_height())
     assert table_heights[1] > table_heights[0]
     assert app.start_button.winfo_rooty() + app.start_button.winfo_height() <= (
         app.root.winfo_rooty() + app.root.winfo_height())
+
+    default_font.configure(size=18)
+    # Rebuild after choosing a system font size, as at application startup.
+    for child in app.root.winfo_children():
+        child.destroy()
+    app._build_ui()
+    app._refresh_table(select=0)
+    app.root.geometry("")
+    app.root.update()
+    row = app.tree.bbox(app.tree.get_children()[0])
+    assert row and row[3] >= default_font.metrics("linespace") + 4
