@@ -78,6 +78,7 @@ def test_missing_target_blocks_playback_without_changing_saved_state(monkeypatch
     for action in ("Open", "Choose", "Clear"):
         assert action in warning.call_args.args[1]
     assert "target unavailable" in app.status_text.set.call_args.args[0].lower()
+    assert "target unavailable" in app._last_stop.lower()
     assert app.steps == steps
     assert app.target_window == anchor
     app._mark_dirty.assert_not_called()
@@ -171,6 +172,7 @@ def test_blocked_preparation_keeps_ui_responsive_and_discards_cancelled_results(
             if action == "error":
                 from clickcue.gui import messagebox
                 messagebox.showerror.assert_called_once()
+                assert app._last_error == "OS failure"
             app._toggle_playback()
             completion = app.events.get(timeout=2)
             app.events.put(completion)
