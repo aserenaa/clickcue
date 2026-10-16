@@ -299,9 +299,9 @@ class ClickCueApp:
         style.configure("Treeview", rowheight=row_height)
         for column, heading, width in [("index", "#", 36),
                                        ("name", "Name", 220),
-                                       ("action", "Action", 60),
+                                       ("action", "Action", max(60, tree_font.measure("Wait for target") + 16)),
                                        ("x", "X", 70), ("y", "Y", 70),
-                                       ("delay", "Delay (s)", 80)]:
+                                       ("delay", "Timing (s)", max(80, tree_font.measure("Timeout 999.9s") + 16))]:
             self.tree.heading(column, text=heading)
             self.tree.column(column, width=width,
                              anchor="w" if column == "name" else "center")
@@ -572,7 +572,7 @@ class ClickCueApp:
                 self.capture_armed = False
                 self._refresh_target_bounds()
                 self._add_step(prefill=Step("New step", event[1], event[2], 1.0))
-        elif kind in ("waiting", "playing"):
+        elif kind in ("waiting", "playing", "condition_waiting"):
             if self._pending_control is not None or (self.player is not None and self.player.paused):
                 return
             _, repetition, index, name = event[:4]
@@ -580,6 +580,8 @@ class ClickCueApp:
                 index = self._run_indices[index]
             total = "∞" if self.loop_forever.get() else self.repetitions.get()
             countdown = f" — waiting {event[4]:.1f}s" if kind == "waiting" else ""
+            if kind == "condition_waiting":
+                countdown = f" — waiting for target window; timeout in {event[4]:.1f}s"
             self.status_text.set(
                 f"Playing — run {repetition}/{total}, "
                 f"step {index + 1}: {name}{countdown}")
@@ -602,12 +604,13 @@ class ClickCueApp:
                 f"detected: {covering}")
         elif kind == "error":
             self._last_error = str(event[1])
+            self._blocked_status = self._blocked_status or f"Stopped — {event[1]}"
             hint = ""
             if sys.platform == "darwin":
                 hint = ("\n\nCheck that the app running Python has the "
                         "Accessibility permission in System Settings → "
                         "Privacy & Security.")
-            messagebox.showerror("Click failed", f"{event[1]}{hint}")
+            messagebox.showerror("Playback failed", f"{event[1]}{hint}")
 
     def _check_permissions(self) -> None:
         if accessibility_trusted(prompt=True):
@@ -780,7 +783,9 @@ class ClickCueApp:
         self._blocked_status = None
         self.player = Player(prepared.steps, preparation.loop_forever,
                              preparation.repetitions, self.events,
-                             guard=windows.guard)
+                             guard=windows.guard, target_probe=windows.probe_target,
+                             prepare_clicks=(lambda identity, cancelled: windows.prepare_deferred(
+                                 prepared.steps, identity, cancelled)) if preparation.deferred else None)
         self._update_editing_controls()
         self.player.start()
         self.start_button.configure(text=f"■ Stop ({self.hotkeys.toggle})")

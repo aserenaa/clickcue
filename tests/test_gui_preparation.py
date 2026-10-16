@@ -2,6 +2,7 @@ import queue
 import threading
 import tkinter as tk
 from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -9,6 +10,8 @@ import pytest
 from clickcue.gui import EVENT_POLL_MS, ClickCueApp
 from clickcue.hotkeys import HotkeySettings
 from clickcue.models import Step, TargetWindow
+from clickcue.platform_support import find_window
+from clickcue.playback import Player
 
 
 @pytest.fixture
@@ -94,6 +97,57 @@ def test_missing_target_blocks_playback_without_changing_saved_state(monkeypatch
     assert app._preparation is None
     app.start_button.configure.assert_called_with(
         text=f"\u25b6 Start ({app.hotkeys.toggle})", state="normal")
+
+
+def test_missing_target_wait_defers_preparation_then_plays_scaled_snapshot(monkeypatch, app):
+    monkeypatch.setattr("clickcue.preparation.sys", SimpleNamespace(platform="win32"), raising=False)
+    monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
+    controller = Mock()
+    monkeypatch.setattr("clickcue.playback.mouse.Controller", lambda: controller)
+    monkeypatch.setattr("clickcue.gui.Player", Player)
+    looked_up = threading.Event()
+    live = []
+
+    def list_windows():
+        looked_up.set()
+        return list(live)
+
+    monkeypatch.setattr("clickcue.platform_support.list_windows", list_windows)
+    monkeypatch.setattr("clickcue.preparation.find_window", find_window)
+    from clickcue.preparation import focus_window, focus_window_at, window_info_at
+    move = Mock(return_value=False)
+    monkeypatch.setattr("clickcue.preparation.move_window", move)
+    monkeypatch.setattr("clickcue.gui.messagebox.showwarning", Mock())
+    app.target_window = TargetWindow("Target", 100, 200, 100, 200)
+    app.steps = [Step("Available", 0, 0, 0, True, "target_window_ready", 2),
+                 Step("Click", 125, 250, 0)]
+    app._repetition_count.return_value = 2
+    original = deepcopy(app.steps)
+    anchor = deepcopy(app.target_window)
+    app._toggle_playback()
+    app._handle_event(app.events.get(timeout=2))
+    player = app.player
+    assert player is not None, "A leading target wait must start before the target exists"
+    try:
+        assert looked_up.wait(1)
+        focus_window.assert_not_called()
+        focus_window_at.assert_not_called()
+        move.assert_not_called()
+        controller.press.assert_not_called()
+        current = TargetWindow("Target", -200, 100, 200, 100, native_id=1, pid=10)
+        window_info_at.return_value = current
+        live.append(current)
+        player.join(timeout=3)
+        assert not player.is_alive()
+        assert controller.position == (-150, 125)
+        assert controller.press.call_count == 2
+        assert controller.release.call_count == 2
+        assert app.steps == original
+        assert app.target_window == anchor
+        assert not any(event[0] in ("error", "blocked") for event in app.events.queue)
+    finally:
+        player.stop()
+        player.join(timeout=2)
 
 
 @pytest.mark.parametrize("wait_only", [False, True])

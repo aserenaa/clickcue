@@ -15,7 +15,8 @@ def test_progress_bursts_keep_latest_and_preserve_durable_events():
         for index in range(1000):
             events.put(("waiting", 1, index, "Pause", 1.0))
             events.put(("playing", 1, index, "Pause"))
-        expected.extend([("playing", 1, 999, "Pause"), boundary])
+            events.put(("condition_waiting", 1, index, "Target", 1.0))
+        expected.extend([("condition_waiting", 1, 999, "Target", 1.0), boundary])
         events.put(boundary)
 
     assert events.qsize() == len(expected)

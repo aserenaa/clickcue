@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter import font
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -45,8 +46,16 @@ def test_wait_only_dialog_ignores_disabled_coordinates():
 
 
 @pytest.mark.parametrize("target_available", [False, True])
+@pytest.mark.parametrize("font_size", [None, 13])
 def test_target_wait_editor_labels_timeout_and_requires_target(
-        tk_runtime, monkeypatch, target_available):
+        tk_runtime, monkeypatch, target_available, font_size):
+    default_font = font.nametofont("TkDefaultFont", root=tk_runtime)
+    text_font = font.nametofont("TkTextFont", root=tk_runtime)
+    original_font = default_font.actual()
+    original_text_font = text_font.actual()
+    if font_size is not None:
+        default_font.configure(size=font_size)
+        text_font.configure(size=font_size)
     parent = tk.Toplevel(tk_runtime)
     parent.update()
     errors = []
@@ -60,6 +69,15 @@ def test_target_wait_editor_labels_timeout_and_requires_target(
         dialog.update()
         assert dialog.timing_label.cget("text") == "Timeout (s)"
         assert all(entry.instate(["disabled"]) for entry in dialog.coordinate_entries)
+        for widget in dialog.winfo_children()[0].winfo_children():
+            assert widget.winfo_x() >= 0 and widget.winfo_y() >= 0
+            assert widget.winfo_rootx() + widget.winfo_width() <= (
+                dialog.winfo_rootx() + dialog.winfo_width())
+            assert widget.winfo_rooty() + widget.winfo_height() <= (
+                dialog.winfo_rooty() + dialog.winfo_height())
+        assert dialog.timing_label.winfo_width() >= default_font.measure("Timeout (s)")
+        chooser_font = font.Font(root=dialog, font=chooser.cget("font"))
+        assert chooser.winfo_width() >= chooser_font.measure("Wait for target window") + 20
         dialog.fields["name"].set("Available")
         dialog.fields["delay"].set("0")
         dialog._accept()
@@ -76,6 +94,8 @@ def test_target_wait_editor_labels_timeout_and_requires_target(
         dialog = StepDialog(parent, "Add step", target_available=target_available)
     finally:
         parent.destroy()
+        default_font.configure(**original_font)
+        text_font.configure(**original_text_font)
     if target_available:
         assert dialog.result == Step("Available", 0, 0, 0, True,
                                      "target_window_ready", 2.5)

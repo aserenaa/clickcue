@@ -1,6 +1,7 @@
 """Window preparation and click coverage policy, independent of the GUI."""
 
 import queue
+import sys
 from dataclasses import dataclass, replace
 from threading import Event, Thread
 
@@ -32,7 +33,31 @@ class WindowPlayback:
         if self.cancelled.is_set():
             raise InterruptedError("Preparation cancelled")
 
-    def prepare(self, steps: list[Step]) -> PreparationResult:
+    def validate_target_wait(self) -> None:
+        if self.anchor is None:
+            raise ValueError("target_window: a target is required for a condition wait")
+        if sys.platform not in ("darwin", "win32"):
+            raise ValueError("Target window waits are unsupported on this platform")
+
+    def probe_target(self, identity: TargetWindow | None) -> TargetWindow | None:
+        """Observe availability without focusing, moving, or accepting a replacement."""
+        self.validate_target_wait()
+        assert self.anchor is not None
+        current = find_window(identity or self.target or self.anchor)
+        if current is None or current.native_id is None or current.pid is None:
+            return None
+        return current
+
+    def prepare_deferred(self, steps: list[Step], identity: TargetWindow | None,
+                         cancelled: Event) -> list[Step]:
+        self.cancelled = cancelled
+        result = self.prepare(steps, identity=identity)
+        if result.missing_target:
+            raise ValueError(result.status)
+        return result.steps
+
+    def prepare(self, steps: list[Step], *,
+                identity: TargetWindow | None = None) -> PreparationResult:
         """Focus the target, restore its bounds if possible, and return the
         steps to play — coordinate-adjusted when the window cannot be moved
         back to where the profile was recorded."""
@@ -50,7 +75,7 @@ class WindowPlayback:
 
         self.target = None
         self._check_cancelled()
-        current = find_window(anchor)
+        current = find_window(identity or anchor)
         self._check_cancelled()
         if current is None:
             return PreparationResult(
@@ -142,6 +167,10 @@ class PlaybackPreparation(Thread):
                  loop_forever: bool, repetitions: int, events: queue.Queue):
         super().__init__(daemon=True)
         self.steps = [replace(step) for step in steps]
+        first_click = next((index for index, step in enumerate(steps) if not step.wait_only),
+                           len(steps))
+        self.deferred = (first_click < len(steps)
+                         and any(step.wait_condition is not None for step in steps[:first_click]))
         self.windows = WindowPlayback(replace(anchor) if anchor else None)
         self.loop_forever = loop_forever
         self.repetitions = repetitions
@@ -151,7 +180,10 @@ class PlaybackPreparation(Thread):
 
     def run(self) -> None:
         try:
-            self.result = self.windows.prepare(self.steps)
+            if any(step.wait_condition is not None for step in self.steps):
+                self.windows.validate_target_wait()
+            self.result = (PreparationResult(self.steps, "Playing…") if self.deferred
+                           else self.windows.prepare(self.steps))
         except Exception as exc:
             self.error = exc
         finally:

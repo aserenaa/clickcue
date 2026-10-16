@@ -5,7 +5,7 @@ from unittest.mock import Mock, PropertyMock
 
 import pytest
 
-from clickcue.models import Step
+from clickcue.models import Step, TargetWindow
 from clickcue.playback import Player
 
 
@@ -43,7 +43,9 @@ def test_countdown_updates_before_click(controller):
         player.join(timeout=2)
 
 
-@pytest.mark.parametrize("steps", [[], [Step("No pause", 0, 0, 0, wait_only=True)]])
+@pytest.mark.parametrize("steps", [[], [Step("No pause", 0, 0, 0, wait_only=True)],
+                                  [Step("Available", 0, 0, 0, True,
+                                        "target_window_ready", 1)]])
 def test_infinite_zero_work_sequence_stops_with_error(controller, monkeypatch, steps):
     monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
     events = queue.Queue()
@@ -208,6 +210,106 @@ def test_wait_only_step_does_not_guard_or_click_and_continues(controller):
         assert not any(event[0] == "blocked" for event in received)
         assert received[-1] == ("stopped",)
     finally:
+        player.stop()
+        player.join(timeout=2)
+
+
+@pytest.mark.parametrize("outcome", ["ready", "timeout", "late", "stop"])
+def test_condition_wait_only_continues_when_available(controller, monkeypatch, outcome):
+    monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
+    events = queue.Queue()
+    calls = []
+    target = TargetWindow("Example", native_id=1, pid=10)
+
+    def probe(identity):
+        calls.append(identity)
+        if outcome == "stop":
+            player.stop()
+        if outcome == "late":
+            threading.Event().wait(0.3)  # Native success arriving after the deadline is unusable.
+            return target
+        return target if outcome == "ready" and len(calls) > 1 else None
+
+    player = Player([Step("Available", 0, 0, 0, True, "target_window_ready", 0.25),
+                     Step("Click", 10, 20, 0)], False, 1, events, target_probe=probe)
+    player.start()
+    try:
+        player.join(timeout=2)
+        assert not player.is_alive()
+        assert controller.press.call_count == (outcome == "ready")
+        received = list(events.queue)
+        assert received[0][:4] == ("condition_waiting", 1, 0, "Available")
+        assert received[-1] == ("stopped",)
+        errors = [event[1] for event in received if event[0] == "error"]
+        if outcome in ("timeout", "late"):
+            assert len(errors) == 1 and "Available" in errors[0] and "timed out" in errors[0]
+            assert not any(event[0] == "playing" for event in received)
+        else:
+            assert not errors
+    finally:
+        player.stop()
+        player.join(timeout=2)
+
+
+@pytest.mark.parametrize("boundary", ["probe", "preparation"])
+@pytest.mark.parametrize("finish", ["resume", "stop"])
+@pytest.mark.parametrize("late_error", [False, True])
+def test_condition_native_results_are_invalidated_by_controls(
+        controller, monkeypatch, boundary, finish, late_error):
+    monkeypatch.setattr("clickcue.playback.FOCUS_GRACE_SECONDS", 0)
+    entered = threading.Event()
+    release = threading.Event()
+    retried = threading.Event()
+    target = TargetWindow("Example", native_id=1, pid=10)
+    calls = []
+    original = [Step("Available", 0, 0, 0, True, "target_window_ready", 0.4),
+                Step("Click", 10, 20, 0)]
+
+    def native():
+        calls.append(True)
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(2)
+            if late_error:
+                raise RuntimeError("Obsolete native failure")
+        else:
+            retried.set()
+
+    def probe(identity):
+        if boundary == "probe":
+            native()
+        return target
+
+    def prepare(identity, cancelled):
+        assert identity.same_window(target)
+        native()
+        return [original[0], Step("Click", 999 if len(calls) == 1 else 10, 20, 0)]
+
+    player = Player(original, False, 1, queue.Queue(), target_probe=probe,
+                    prepare_clicks=prepare if boundary == "preparation" else None)
+    player.start()
+    try:
+        assert entered.wait(2)
+        if finish == "stop":
+            player.stop()
+        else:
+            player.pause()
+        release.set()
+        if finish == "resume":
+            # Paused time exceeds the full condition timeout; no result may
+            # authorize later input, and Resume must perform fresh native work.
+            assert not retried.wait(0.5)
+            controller.press.assert_not_called()
+            player.resume()
+            assert retried.wait(2)
+        player.join(timeout=2)
+        assert not player.is_alive()
+        assert controller.press.call_count == (finish == "resume")
+        if finish == "resume":
+            assert controller.position == (10, 20)
+        assert not any(event[0] == "error" for event in player.events.queue)
+    finally:
+        release.set()
         player.stop()
         player.join(timeout=2)
 

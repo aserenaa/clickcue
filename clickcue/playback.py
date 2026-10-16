@@ -13,7 +13,7 @@ from typing import Callable, Literal
 
 from pynput import mouse
 
-from .models import Step
+from .models import Step, TargetWindow
 
 FOCUS_GRACE_SECONDS = 0.3
 PRESS_HOLD_SECONDS = 0.02
@@ -22,17 +22,24 @@ PRESS_HOLD_SECONDS = 0.02
 # covering the click point when it is not. Pause/Stop set the event to interrupt
 # retry waits. Player discards cancelled results and rechecks after Resume.
 ClickGuard = Callable[[Step, threading.Event], str | None]
+TargetProbe = Callable[[TargetWindow | None], TargetWindow | None]
+PrepareClicks = Callable[[TargetWindow | None, threading.Event], list[Step]]
 
 
 class Player(threading.Thread):
     def __init__(self, steps: list[Step], loop_forever: bool, repetitions: int,
-                 events: queue.Queue, guard: ClickGuard | None = None):
+                 events: queue.Queue, guard: ClickGuard | None = None,
+                 *, target_probe: TargetProbe | None = None,
+                 prepare_clicks: PrepareClicks | None = None):
         super().__init__(daemon=True)
         self.steps = steps
         self.loop_forever = loop_forever
         self.repetitions = repetitions
         self.events = events
         self.guard = guard
+        self.target_probe = target_probe
+        self.prepare_clicks = prepare_clicks
+        self._target: TargetWindow | None = None
         self._stop_event = threading.Event()
         self._guard_cancelled = threading.Event()
         self._condition = threading.Condition()
@@ -114,16 +121,95 @@ class Player(threading.Thread):
             return False
 
     def _play_once(self, repetition: int) -> None:
-        for index, step in enumerate(self.steps):
+        for index in range(len(self.steps)):
+            step = self.steps[index]
             def progress(remaining: float, index: int = index, step: Step = step) -> None:
                 self.events.put(("waiting", repetition, index, step.name, remaining))
 
-            if not self._wait(step.delay, progress):
+            if step.wait_condition is not None:
+                if not self._wait_for_target(step, repetition, index):
+                    return
+            elif not self._wait(step.delay, progress):
                 return
             self.events.put(("playing", repetition, index, step.name))
             if step.wait_only:
                 continue
-            self._click(step)
+            if not self._prepare_clicks():
+                return
+            self._click(self.steps[index])
+
+    def _wait_for_target(self, step: Step, repetition: int, index: int) -> bool:
+        if self.target_probe is None:
+            raise ValueError(f"{step.name}: target window checking is unavailable")
+        assert step.timeout is not None
+        with self._condition:
+            deadline = self._active_time() + step.timeout
+        while self._wait(0):
+            with self._condition:
+                if self._stop_event.is_set():
+                    return False
+                if self._paused_at is not None:
+                    continue
+                generation = self._pause_generation
+                remaining = deadline - self._active_time()
+                if remaining <= 0:
+                    raise TimeoutError(f"{step.name}: timed out waiting for the target window")
+                self.events.put(("condition_waiting", repetition, index, step.name, remaining))
+            try:
+                target = self.target_probe(self._target)
+            except Exception:
+                with self._condition:
+                    if self._stop_event.is_set():
+                        return False
+                    if self._paused_at is not None or generation != self._pause_generation:
+                        continue
+                    raise
+            with self._condition:
+                if self._stop_event.is_set():
+                    return False
+                if self._paused_at is not None or generation != self._pause_generation:
+                    continue
+                remaining = deadline - self._active_time()
+                if remaining <= 0:
+                    raise TimeoutError(f"{step.name}: timed out waiting for the target window")
+                if target is not None:
+                    # Pin a name-only profile's first accepted live identity.
+                    self._target = target
+                    return True
+            if not self._wait(min(0.1, remaining)):
+                return False
+        return False
+
+    def _prepare_clicks(self) -> bool:
+        prepare = self.prepare_clicks
+        if prepare is None:
+            return True
+        while self._wait(0):
+            with self._condition:
+                if self._stop_event.is_set():
+                    return False
+                if self._paused_at is not None:
+                    continue
+                generation = self._pause_generation
+                self._guard_cancelled = threading.Event()
+            try:
+                steps = prepare(self._target, self._guard_cancelled)
+            except Exception:
+                with self._condition:
+                    if self._stop_event.is_set():
+                        return False
+                    if self._paused_at is not None or generation != self._pause_generation:
+                        continue
+                    raise
+            with self._condition:
+                if self._stop_event.is_set():
+                    return False
+                if self._paused_at is not None or generation != self._pause_generation:
+                    continue
+                self.steps = steps
+                self.prepare_clicks = None
+                return True
+        return False
 
     def _guard(self, step: Step) -> int | None:
         while self._wait(0):
