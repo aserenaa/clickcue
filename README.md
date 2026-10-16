@@ -149,6 +149,9 @@ need their own.
    without a click, use *Add* and enable *Wait only (no click)*; coordinates
    are ignored. A normal click step still clicks after its delay expires.
 3. Add, edit (double-click), remove, and reorder (▲/▼) steps as needed.
+   *Remove* deletes all selected steps. The arrows move each selected group one
+   row, preserving order; groups already at that edge stay put while other
+   groups can move. Moved steps stay selected and scroll into view.
    Select one or more steps and click *Copy* to duplicate them in order after
    the last selected step, keeping their names, coordinates, and delays. Use
    Shift-click to select a range, or Command-click (macOS) / Ctrl-click

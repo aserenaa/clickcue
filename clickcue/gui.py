@@ -437,10 +437,11 @@ class ClickCueApp:
             self._refresh_table(select=index)
 
     def _remove_step(self) -> None:
-        index = self._selected_index()
-        if index is None:
+        indices = sorted(self.tree.index(item) for item in self.tree.selection())
+        if not indices:
             return
-        del self.steps[index]
+        for index in reversed(indices):
+            del self.steps[index]
         self._mark_dirty()
         self._refresh_table()
 
@@ -458,16 +459,27 @@ class ClickCueApp:
         self.tree.see(children[insert_at])
 
     def _move_step(self, offset: int) -> None:
-        index = self._selected_index()
-        if index is None:
+        indices = {self.tree.index(item) for item in self.tree.selection()}
+        if not indices:
             return
-        target = index + offset
-        if not 0 <= target < len(self.steps):
+        moved_to = None
+        # Work from the leading edge so adjacent selected rows move together.
+        for index in sorted(indices, reverse=offset > 0):
+            target = index + offset
+            if not 0 <= target < len(self.steps) or target in indices:
+                continue
+            self.steps[index], self.steps[target] = (self.steps[target],
+                                                     self.steps[index])
+            indices.remove(index)
+            indices.add(target)
+            moved_to = target
+        if moved_to is None:
             return
-        self.steps[index], self.steps[target] = (self.steps[target],
-                                                 self.steps[index])
         self._mark_dirty()
-        self._refresh_table(select=target)
+        self._refresh_table()
+        children = self.tree.get_children()
+        self.tree.selection_set([children[index] for index in sorted(indices)])
+        self.tree.see(children[moved_to])
 
     def _selected_index(self) -> int | None:
         selection = self.tree.selection()
