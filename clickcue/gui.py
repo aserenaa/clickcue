@@ -14,8 +14,8 @@ from .events import EventQueue
 from .hotkeys import (FUNCTION_KEYS, HotkeySettings, create_hotkey_listener,
                       load_hotkeys, save_hotkeys)
 from .models import Step, TargetWindow
-from .platform_support import (accessibility_trusted, find_window,
-                               list_windows, window_info_at)
+from .platform_support import (accessibility_trusted, configure_dpi_awareness,
+                               find_window, list_windows, window_info_at)
 from .playback import Player
 from .preparation import WindowPlayback
 from .profiles import Profile, ProfileStore, read_profile, write_profile
@@ -110,7 +110,8 @@ class WindowPickerDialog(tk.Toplevel):
         self.listbox = tk.Listbox(body, width=48, height=12)
         for window in self.windows:
             self.listbox.insert(
-                "end", f"{window.app}  ({window.width}×{window.height})")
+                "end", f"{window.app} - {window.title or window.native_id or 'window'}  "
+                       f"({window.x}, {window.y}; {window.width}×{window.height})")
         self.listbox.pack(pady=(8, 0))
         self.listbox.bind("<Double-1>", lambda _event: self._accept())
         if self.windows:
@@ -455,7 +456,7 @@ class ClickCueApp:
         """Keep stored bounds in sync with the window at capture time."""
         if self.target_window is None:
             return
-        current = find_window(self.target_window.app)
+        current = find_window(self.target_window)
         if current and not current.same_bounds(self.target_window):
             self.target_window = current
             self._mark_dirty()
@@ -477,7 +478,7 @@ class ClickCueApp:
             self.status_text.set(prepared.status)
             messagebox.showwarning(
                 "Target window unavailable",
-                f"No window of “{self.target_window.app}” is open.\n\n"
+                f"“{self.target_window.app}” is missing or matches multiple windows.\n\n"
                 "Open the target app and try again, use Target window → "
                 "Choose… to reselect it, or Clear the target to play with "
                 "saved absolute coordinates.")
@@ -874,6 +875,7 @@ class ClickCueApp:
 
 
 def main() -> None:
+    configure_dpi_awareness()
     root = tk.Tk()
     ClickCueApp(root)
     root.mainloop()

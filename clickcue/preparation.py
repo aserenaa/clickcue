@@ -25,6 +25,7 @@ class PreparationResult:
 class WindowPlayback:
     def __init__(self, anchor: TargetWindow | None):
         self.anchor = anchor
+        self.target: TargetWindow | None = None
 
     def prepare(self, steps: list[Step]) -> PreparationResult:
         """Focus the target, restore its bounds if possible, and return the
@@ -39,22 +40,25 @@ class WindowPlayback:
             return PreparationResult(list(steps), (f"Playing on “{app}”…" if app
                                                    else "Playing…"))
 
-        current = find_window(anchor.app)
+        self.target = None
+        current = find_window(anchor)
         if current is None:
             return PreparationResult(
-                list(steps), "Target unavailable — open, reselect, or clear the target",
+                list(steps), "Target unavailable or ambiguous — open, reselect, or clear the target",
                 missing_target=True)
 
+        self.target = current
         focus_window(current)
         if not anchor.has_bounds or current.same_bounds(anchor):
-            return self._verified(anchor, list(steps),
+            return self._verified(list(steps),
                                   f"Playing on “{anchor.app}”…")
 
-        if move_window(anchor):
-            restored = find_window(anchor.app)
+        if move_window(replace(current, x=anchor.x, y=anchor.y,
+                               width=anchor.width, height=anchor.height)):
+            restored = find_window(current)
             if restored and restored.same_bounds(anchor):
                 return self._verified(
-                    anchor, list(steps),
+                    list(steps),
                     f"Playing on “{anchor.app}” (window restored)…")
             current = restored or current
 
@@ -73,16 +77,16 @@ class WindowPlayback:
             for step in steps
         ]
         return self._verified(
-            anchor, adjusted,
+            adjusted,
             f"Playing on “{anchor.app}” (coordinates adjusted)…")
 
-    def _verified(self, anchor: TargetWindow, steps: list[Step],
+    def _verified(self, steps: list[Step],
                   status: str) -> PreparationResult:
         """Warn when another window still covers the first click point."""
         time.sleep(0.25)  # let the focus change settle before checking
         first = next(step for step in steps if not step.wait_only)
         on_top = window_info_at(first.x, first.y)
-        if on_top and on_top.app != anchor.app:
+        if on_top and (self.target is None or not self.target.same_window(on_top)):
             status += f"  ⚠ “{on_top.app}” is covering the click area"
         return PreparationResult(steps, status)
 
@@ -95,15 +99,19 @@ class WindowPlayback:
         if anchor is None:
             return None
         on_top = None
+        target = self.target
         for attempt in range(3):
             if cancelled.is_set():
                 return None
             on_top = window_info_at(step.x, step.y, include_own=True)
-            if on_top and on_top.app == anchor.app:
+            if on_top and target is not None and target.same_window(on_top):
                 return None
             if attempt < 2:
-                focus_window(anchor)
+                if target is not None:
+                    focus_window(target)
                 if cancelled.wait(0.4):
                     return None
+        if on_top and on_top.app == anchor.app and on_top.native_id is not None:
+            return f"{on_top.app} (window {on_top.native_id})"
         return on_top.app if on_top else "no window detected"
 
