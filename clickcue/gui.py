@@ -40,16 +40,26 @@ class StepDialog(tk.Toplevel):
             "delay": tk.StringVar(value=str(step.delay) if step else "1.0"),
         }
         rows = [("Name", "name"), ("X", "x"), ("Y", "y"),
-                ("Delay before click (s)", "delay")]
+                ("Delay (s)", "delay")]
+        self.coordinate_entries = []
         for row, (label, key) in enumerate(rows):
             ttk.Label(body, text=label).grid(row=row, column=0, sticky="w", pady=2)
             entry = ttk.Entry(body, textvariable=self.fields[key], width=22)
             entry.grid(row=row, column=1, pady=2, padx=(8, 0))
+            if key in ("x", "y"):
+                self.coordinate_entries.append(entry)
             if row == 0:
                 entry.focus_set()
 
+        self.wait_only = tk.BooleanVar(value=step.wait_only if step else False)
+        ttk.Checkbutton(body, text="Wait only (no click)",
+                        variable=self.wait_only,
+                        command=self._update_coordinates).grid(
+            row=len(rows), column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self._update_coordinates()
+
         buttons = ttk.Frame(body)
-        buttons.grid(row=len(rows), column=0, columnspan=2, pady=(10, 0))
+        buttons.grid(row=len(rows) + 1, column=0, columnspan=2, pady=(10, 0))
         ttk.Button(buttons, text="OK", command=self._accept).grid(
             row=0, column=0, padx=4)
         ttk.Button(buttons, text="Cancel", command=self.destroy).grid(
@@ -61,11 +71,15 @@ class StepDialog(tk.Toplevel):
         self.grab_set()
         self.wait_window()
 
+    def _update_coordinates(self) -> None:
+        for entry in self.coordinate_entries:
+            entry.configure(state="disabled" if self.wait_only.get() else "normal")
+
     def _accept(self) -> None:
         try:
             name = self.fields["name"].get().strip()
-            x = int(self.fields["x"].get())
-            y = int(self.fields["y"].get())
+            x = 0 if self.wait_only.get() else int(self.fields["x"].get())
+            y = 0 if self.wait_only.get() else int(self.fields["y"].get())
             delay = float(self.fields["delay"].get())
             if not name:
                 raise ValueError("Name cannot be empty")
@@ -74,7 +88,7 @@ class StepDialog(tk.Toplevel):
         except ValueError as exc:
             messagebox.showerror("Invalid input", str(exc), parent=self)
             return
-        self.result = Step(name, x, y, delay)
+        self.result = Step(name, x, y, delay, wait_only=self.wait_only.get())
         self.destroy()
 
 
@@ -196,11 +210,12 @@ class ClickCueApp:
 
         table_frame = ttk.Frame(main)
         table_frame.pack(fill="both", expand=True, pady=(10, 0))
-        columns = ("index", "name", "x", "y", "delay")
+        columns = ("index", "name", "action", "x", "y", "delay")
         self.tree = ttk.Treeview(table_frame, columns=columns,
                                  show="headings", selectmode="extended")
         for column, heading, width in [("index", "#", 36),
                                        ("name", "Name", 220),
+                                       ("action", "Action", 60),
                                        ("x", "X", 70), ("y", "Y", 70),
                                        ("delay", "Delay (s)", 80)]:
             self.tree.heading(column, text=heading)
@@ -314,10 +329,10 @@ class ClickCueApp:
             self._blocked_status = None
             self._highlight_step(None)
         elif kind == "blocked":
-            _, step_name, covering = event
+            _, step_name, covering, x, y = event
             self._blocked_status = (
-                f"Stopped — “{covering}” was covering the target window "
-                f"at step “{step_name}”")
+                f"Stopped — target not found at ({x}, {y}) for “{step_name}”; "
+                f"detected: {covering}")
         elif kind == "error":
             hint = ""
             if sys.platform == "darwin":
@@ -384,6 +399,7 @@ class ClickCueApp:
         if prepared is None:
             return
         steps, status = prepared
+        self._blocked_status = None
         self._playing_anchor = self.target_window
         self.player = Player(steps, self.loop_forever.get(),
                              self._repetition_count(), self.events,
@@ -397,8 +413,10 @@ class ClickCueApp:
         steps to play — coordinate-adjusted when the window cannot be moved
         back to where the profile was recorded."""
         anchor = self.target_window
+        first = next((step for step in self.steps if not step.wait_only), None)
+        if first is None:
+            return list(self.steps), "Playing waits…"
         if anchor is None:
-            first = self.steps[0]
             app = focus_window_at(first.x, first.y)
             return list(self.steps), (f"Playing on “{app}”…" if app
                                       else "Playing…")
@@ -428,10 +446,10 @@ class ClickCueApp:
         scale_x = current.width / anchor.width
         scale_y = current.height / anchor.height
         adjusted = [
-            Step(step.name,
-                 round(current.x + (step.x - anchor.x) * scale_x),
-                 round(current.y + (step.y - anchor.y) * scale_y),
-                 step.delay)
+            replace(step,
+                    x=round(current.x + (step.x - anchor.x) * scale_x),
+                    y=round(current.y + (step.y - anchor.y) * scale_y))
+            if not step.wait_only else step
             for step in self.steps
         ]
         return self._verified(
@@ -442,7 +460,8 @@ class ClickCueApp:
                   status: str) -> tuple[list[Step], str]:
         """Warn when another window still covers the first click point."""
         time.sleep(0.25)  # let the focus change settle before checking
-        on_top = window_info_at(steps[0].x, steps[0].y)
+        first = next(step for step in steps if not step.wait_only)
+        on_top = window_info_at(first.x, first.y)
         if on_top and on_top.app != anchor.app:
             status += f"  ⚠ “{on_top.app}” is covering the click area"
         return steps, status
@@ -462,7 +481,7 @@ class ClickCueApp:
             if attempt < 2:
                 focus_window(anchor)
                 time.sleep(0.4)
-        return on_top.app if on_top else "another window"
+        return on_top.app if on_top else "no window detected"
 
     def _repetition_count(self) -> int:
         try:
@@ -535,15 +554,21 @@ class ClickCueApp:
         self.tree.delete(*self.tree.get_children())
         for index, step in enumerate(self.steps):
             self.tree.insert("", "end", values=(index + 1, step.name,
-                                                step.x, step.y, step.delay))
+                                                "Wait" if step.wait_only else "Click",
+                                                "—" if step.wait_only else step.x,
+                                                "—" if step.wait_only else step.y,
+                                                step.delay))
         if select is not None and 0 <= select < len(self.steps):
             self.tree.selection_set(self.tree.get_children()[select])
 
     def _highlight_step(self, index: int | None) -> None:
         children = self.tree.get_children()
         self.tree.selection_remove(*children)
-        if index is not None and index < len(children):
-            self.tree.selection_set(children[index])
+        if index is not None and 0 <= index < len(children):
+            item = children[index]
+            self.tree.selection_set(item)
+            self.tree.focus(item)
+            self.tree.see(item)
 
     def _mark_dirty(self) -> None:
         if not self._loading:
@@ -633,8 +658,8 @@ class ClickCueApp:
         self._write_profile(name)
 
     def _write_profile(self, name: str) -> None:
-        if self.target_window is None and self.steps:
-            first = self.steps[0]
+        first = next((step for step in self.steps if not step.wait_only), None)
+        if self.target_window is None and first is not None:
             self.target_window = window_info_at(first.x, first.y)
         profile = Profile(name=name, steps=list(self.steps),
                           loop_forever=self.loop_forever.get(),

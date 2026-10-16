@@ -9,12 +9,14 @@ let it run.
 
 - **Named steps** — every click has a name ("Button 1", "Close menu"), screen
   coordinates, and a delay in seconds before it fires.
+- **Wait-only steps** — pause without moving the pointer or clicking. In the
+  Add/Edit dialog, enable *Wait only (no click)* and enter the delay.
 - **Visual capture** — hover the cursor over the target and press **F8**; the
   position is captured without sending a click to the app underneath.
 - **Loop playback** — run a sequence once, N times, or forever. **F6** starts
   and stops playback globally, even while the target app is in the foreground,
   and interrupts mid-delay. While a step waits, the playback status shows its
-  remaining delay in seconds.
+  remaining delay in seconds. The list selects and scrolls to the active step.
 - **Window anchoring** — a profile records its target window's position and
   size. If the window has moved or been resized at playback time, ClickCue
   moves it back to the recorded bounds (or scales the coordinates when the
@@ -87,7 +89,9 @@ need their own.
 2. **Capture a step**: click *Capture (F8)*, hover the cursor over the target
    point, and press **F8**. A dialog opens with the coordinates pre-filled;
    give the step a name and a delay. Don't move the target window while
-   capturing — the anchor bounds are refreshed on each capture.
+   capturing — the anchor bounds are refreshed on each capture. For a pause
+   without a click, use *Add* and enable *Wait only (no click)*; coordinates
+   are ignored. A normal click step still clicks after its delay expires.
 3. Add, edit (double-click), remove, and reorder (▲/▼) steps as needed.
    Select one or more steps and click *Copy* to duplicate them in order after
    the last selected step, keeping their names, coordinates, and delays. Use
@@ -111,7 +115,8 @@ Profiles are plain JSON files in `~/.clickcue/profiles/`:
   "repetitions": 1,
   "target_window": { "app": "Some Game", "x": 40, "y": 60, "width": 1280, "height": 720 },
   "steps": [
-    { "name": "Button 1", "x": 512, "y": 384, "delay": 1.5 }
+    { "name": "Button 1", "x": 512, "y": 384, "delay": 1.5 },
+    { "name": "Pause", "x": 0, "y": 0, "delay": 210, "wait_only": true }
   ]
 }
 ```
@@ -121,6 +126,12 @@ capture time. Before playback ClickCue focuses that window and, if it has
 moved or been resized, moves it back to those bounds (falling back to
 proportional coordinate scaling when the OS refuses the move). Steps keep
 absolute screen coordinates, valid when the window is at the recorded bounds.
+
+`wait_only` defaults to `false` for existing steps. Set it to `true` for a
+delay without a click; the step's name and coordinates do not imply a pause.
+Wait-only steps do not check window coverage, and automatic target detection
+uses the first click step. Blocked clicks report the coordinates checked and
+the detected window so misplaced click points can be diagnosed.
 
 ## Platform support
 

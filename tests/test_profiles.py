@@ -5,7 +5,9 @@ from clickcue.profiles import Profile, ProfileStore
 def make_profile(name="Game A - farming"):
     return Profile(
         name=name,
-        steps=[Step("Button 1", 100, 200, 1.5), Step("Button 2", 300, 400, 0.5)],
+        steps=[Step("Button 1", 100, 200, 1.5),
+               Step("Pause", 0, 0, 210, wait_only=True),
+               Step("Button 2", 300, 400, 0.5)],
         loop_forever=False,
         repetitions=10,
         target_window=TargetWindow("Some Game", 40, 60, 1280, 720),
@@ -57,12 +59,15 @@ def test_filenames_are_sanitized(tmp_path):
 
 def test_load_defaults_for_missing_fields(tmp_path):
     store = ProfileStore(tmp_path)
-    (tmp_path / "Minimal.json").write_text('{"name": "Minimal", "steps": []}')
+    (tmp_path / "Minimal.json").write_text(
+        '{"name": "Minimal", "steps": '
+        '[{"name": "Button", "x": 1, "y": 2, "delay": 0}]}')
 
     profile = store.load("Minimal")
     assert profile.loop_forever is True
     assert profile.repetitions == 1
     assert profile.target_window is None
+    assert profile.steps == [Step("Button", 1, 2, 0, wait_only=False)]
 
 
 def test_load_legacy_target_app(tmp_path):

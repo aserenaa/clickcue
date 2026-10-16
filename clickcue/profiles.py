@@ -40,7 +40,8 @@ class Profile:
         return cls(
             name=data["name"],
             steps=[
-                Step(s["name"], int(s["x"]), int(s["y"]), float(s["delay"]))
+                Step(s["name"], int(s["x"]), int(s["y"]), float(s["delay"]),
+                     wait_only=bool(s.get("wait_only", False)))
                 for s in data.get("steps", [])
             ],
             loop_forever=bool(data.get("loop_forever", True)),

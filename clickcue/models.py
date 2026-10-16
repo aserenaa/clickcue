@@ -5,12 +5,13 @@ from dataclasses import dataclass
 
 @dataclass
 class Step:
-    """A single click: a named screen position with a delay before clicking."""
+    """A named click with a preceding delay, or a delay without a click."""
 
     name: str
     x: int
     y: int
     delay: float
+    wait_only: bool = False
 
 
 @dataclass
