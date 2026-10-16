@@ -18,8 +18,7 @@ from .platform_support import (
 class PreparationResult:
     steps: list[Step]
     status: str
-    # The GUI decides whether to accept these absolute coordinates. The guard
-    # retains the anchor even when that fallback is accepted.
+    # The GUI must block playback until the target is available or cleared.
     missing_target: bool = False
 
 
@@ -43,7 +42,7 @@ class WindowPlayback:
         current = find_window(anchor.app)
         if current is None:
             return PreparationResult(
-                list(steps), "Playing (target window not found)…",
+                list(steps), "Target unavailable — open, reselect, or clear the target",
                 missing_target=True)
 
         focus_window(current)

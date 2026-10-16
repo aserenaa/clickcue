@@ -178,6 +178,10 @@ that do not conflict with shortcuts in your target app or operating system.
    stops playback, cancelling a pending click during guard focus retries or during
    the wait before pressing. If the mouse button is already held, stopping
    releases it promptly. A press already being sent to the OS may still occur.
+   If the saved target is unavailable, click playback stays stopped: open the
+   target app, reselect it with *Target window → Choose…*, or use *Clear* to
+   explicitly play with saved absolute coordinates. This leaves your steps
+   unchanged. Wait-only sequences can play even when the target is unavailable.
 6. Save the sequence as a profile (*Save As…*) and reload it from the
    dropdown. *New* starts a fresh sequence.
 

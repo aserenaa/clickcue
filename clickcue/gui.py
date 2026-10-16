@@ -473,10 +473,14 @@ class ClickCueApp:
             return
         windows = WindowPlayback(self.target_window)
         prepared = windows.prepare(self.steps)
-        if prepared.missing_target and not messagebox.askyesno(
-                "Target window not found",
+        if prepared.missing_target:
+            self.status_text.set(prepared.status)
+            messagebox.showwarning(
+                "Target window unavailable",
                 f"No window of “{self.target_window.app}” is open.\n\n"
-                "Play with the saved absolute coordinates anyway?"):
+                "Open the target app and try again, use Target window → "
+                "Choose… to reselect it, or Clear the target to play with "
+                "saved absolute coordinates.")
             return
         self._blocked_status = None
         self.player = Player(prepared.steps, self.loop_forever.get(),
