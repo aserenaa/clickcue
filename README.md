@@ -118,17 +118,30 @@ In **System Settings → Privacy & Security**, enable the app you launch Python
 from (Terminal, iTerm, VS Code, …) under:
 
 1. **Accessibility** — required to synthesize clicks.
-2. **Input Monitoring** — required for the global F6/F8 hotkeys.
+2. **Input Monitoring** — required for the global hotkeys (F6/F8 by default).
 
 Then quit ClickCue and start it again; permissions only apply to new
 processes. Note that the grant is per launcher app: Terminal and iTerm each
 need their own.
 
-> On Mac keyboards where F-keys control brightness/volume, press **Fn+F6 /
-> Fn+F8**, or enable "Use F1, F2, etc. keys as standard function keys" in
+> On Mac keyboards where F-keys control brightness/volume, hold **Fn** with
+> your chosen function key (**Fn+F6 / Fn+F8** by default), or enable
+> "Use F1, F2, etc. keys as standard function keys" in
 > System Settings → Keyboard.
 
 ## Usage
+
+Under *Global hotkeys (this machine)*, choose separate **F1–F12** keys for
+start/stop and capture, then click *Apply*. Stop playback and finish any armed
+capture before applying changes. Holding a key triggers its action once;
+release it before pressing again. Buttons and hints show the active keys.
+On X11, synthetic auto-repeat release/press pairs are normalized locally;
+your system keyboard repeat settings are unchanged.
+The examples below use the defaults, **F6** and **F8**.
+
+Hotkey preferences are saved atomically in `~/.clickcue/hotkeys.json`, separate
+from shareable profiles. Missing or invalid preferences use F6/F8. Choose keys
+that do not conflict with shortcuts in your target app or operating system.
 
 | Shortcut | Action |
 |---|---|
@@ -258,7 +271,7 @@ Window anchoring and the click guard are best-effort safeguards, not a security
 boundary. macOS identifies targets by application name; Windows uses window
 titles. Another window from the same app or with the same title can be mistaken
 for the target. Linux does not provide these window safeguards. Test sequences
-in a harmless window first, and keep F6 available to stop playback.
+in a harmless window first, and keep your start/stop hotkey available to stop playback.
 
 | Platform | Status |
 |---|---|
@@ -303,8 +316,10 @@ on your computer in `~/.clickcue/profiles/` as plain JSON. They contain step
 names, coordinates, delays, and the target application's name (or window title
 on Windows) and bounds. Window titles and step names can reveal private
 information. Review and sanitize profiles and screenshots before sharing them.
-The global keyboard listener handles F6 and F8; ClickCue does not save typed
-text. Installation and dependency/security checks contact package services.
+The global keyboard listener handles the chosen function keys (F6 and F8 by
+default); ClickCue does not save typed text. Machine-local key preferences stay
+in `~/.clickcue/hotkeys.json`. Installation and dependency/security checks
+contact package services.
 
 Report vulnerabilities through [GitHub's private reporting form](https://github.com/aserenaa/clickcue/security/advisories/new),
 not a public issue. See [SECURITY.md](SECURITY.md) for stored data, permissions,

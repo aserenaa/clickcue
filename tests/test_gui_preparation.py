@@ -3,12 +3,14 @@ from unittest.mock import Mock
 import pytest
 
 from clickcue.gui import ClickCueApp
+from clickcue.hotkeys import HotkeySettings
 from clickcue.models import Step, TargetWindow
 
 
 @pytest.mark.parametrize("accept", [False, True])
 def test_missing_target_requires_gui_decision_before_start(monkeypatch, accept):
     app = ClickCueApp.__new__(ClickCueApp)
+    app.hotkeys = HotkeySettings()
     app.player = None
     app.steps = [Step("Click", 17, 29, 0)]
     app.target_window = TargetWindow("Target")
