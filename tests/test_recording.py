@@ -12,6 +12,7 @@ production API exists solely to support these tests. Footer/font geometry
 remains owned by test_gui_accessibility's existing layout contract.
 """
 
+import gc
 import os
 import queue
 import tkinter as tk
@@ -267,31 +268,44 @@ def editor(hooks, monkeypatch, tmp_path, tk_runtime):
     app._copy_step()
     app._undo()  # Both histories contain real edits.
     app.dirty = False
-    yield app
-    if app._recording is not None:
-        app._recording.stop()
-        app._recording.join(2)
-        assert not app._recording.is_alive()
-    for timer in root.tk.call("after", "info"):
-        root.after_cancel(timer)
-    if root.winfo_exists():
-        root.destroy()
+    try:
+        yield app
+    finally:
+        try:
+            if app._recording is not None:
+                app._recording.stop()
+                app._recording.join(2)
+                assert not app._recording.is_alive()
+        finally:
+            for timer in root.tk.call("after", "info"):
+                root.after_cancel(timer)
+            if root.winfo_exists():
+                root.destroy()
 
 
 def wait_ui(app, predicate):
     done = tk.BooleanVar(master=app.root)
+    pending = None
 
     def check():
+        nonlocal pending
         if predicate():
             done.set(True)
         else:
-            app.root.after(5, check)
+            pending = app.root.after(5, check)
 
     deadline = app.root.after(2000, done.set, False)
-    app.root.after(0, check)
-    app.root.wait_variable(done)
-    app.root.after_cancel(deadline)
-    assert done.get(), app.status_text.get()
+    pending = app.root.after(0, check)
+    try:
+        app.root.wait_variable(done)
+        assert done.get(), app.status_text.get()
+    finally:
+        app.root.after_cancel(deadline)
+        app.root.after_cancel(pending)
+        # The recursive callback otherwise forms check -> closure -> check,
+        # retaining done until GC on an arbitrary (possibly recording) thread.
+        # Dispose the Tk variable here, including on timeout or assertion failure.
+        check = None
 
 
 def begin_ui(app):
@@ -446,9 +460,14 @@ def test_tk_stop_is_responsive_while_native_recording_work_is_blocked(editor, mo
     app = editor
     entered, release = Event(), Event()
     if blocked_at == "readiness":
+        # Isolate this helper's ownership: a later worker allocation/collection
+        # must not inherit its Tk variable destructor. No global GC policy change.
+        gc.collect()
+        wait_ui(app, lambda: True)
         original = SyntheticListener._mark_ready
 
         def ready(listener):
+            gc.collect()
             entered.set()
             assert release.wait(2)
             original(listener)

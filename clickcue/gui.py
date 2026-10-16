@@ -324,7 +324,7 @@ class ClickCueApp:
         footer = ttk.Frame(main)
         footer.pack(side="bottom", fill="x", before=table_frame)
         step_bar = ttk.Frame(footer)
-        step_bar.pack(fill="x", pady=(8, 0))
+        step_bar.pack(fill="x", pady=(4, 0))
         self.capture_button = ttk.Button(
             step_bar, text=f"Capture ({self.hotkeys.capture})",
             command=self._arm_capture)
@@ -358,7 +358,7 @@ class ClickCueApp:
             record_bar, text="Discard", command=self._discard_recording, state="disabled")
         self.discard_recording_button.pack(side="left")
 
-        loop_bar = ttk.LabelFrame(footer, text="Playback", padding=8)
+        loop_bar = ttk.LabelFrame(footer, text="Playback", padding=(8, 4))
         loop_bar.pack(fill="x", pady=(6, 0))
         ttk.Radiobutton(loop_bar, text="Loop forever",
                         variable=self.loop_forever, value=True).pack(side="left")
@@ -389,8 +389,8 @@ class ClickCueApp:
         status_label.bind("<Configure>", lambda event:
                           status_label.configure(wraplength=max(1, event.width)))
 
-        hotkey_bar = ttk.LabelFrame(footer, text="Global hotkeys (this machine)", padding=8)
-        hotkey_bar.pack(fill="x", pady=(10, 0))
+        hotkey_bar = ttk.LabelFrame(footer, text="Global hotkeys (this machine)", padding=(8, 4))
+        hotkey_bar.pack(fill="x", pady=(6, 0))
         self.toggle_key = tk.StringVar(value=self.hotkeys.toggle)
         self.capture_key = tk.StringVar(value=self.hotkeys.capture)
         for label, variable in (("Start/stop", self.toggle_key),
@@ -402,7 +402,7 @@ class ClickCueApp:
             hotkey_bar, text="Apply", command=self._apply_hotkeys)
         self.hotkey_apply_button.pack(side="left")
         self.hotkey_hint = ttk.Label(footer, text=self._hint_text(), wraplength=580)
-        self.hotkey_hint.pack(fill="x", pady=(10, 0))
+        self.hotkey_hint.pack(fill="x", pady=(4, 0))
         self.hotkey_hint.bind("<Configure>", lambda event:
                               self.hotkey_hint.configure(wraplength=max(1, event.width)))
         self.root.update_idletasks()
@@ -449,17 +449,15 @@ class ClickCueApp:
                     state="disabled" if recording.finished.is_set() else "normal")
 
     def _hint_text(self) -> str:
-        hotkeys = (f"Global hotkeys: {self.hotkeys.toggle} start/stop, "
+        hotkeys = (f"{self.hotkeys.toggle} start/stop, "
                    f"{self.hotkeys.capture} capture cursor position. "
                    f"Record clicks: {self.hotkeys.capture} begins, "
                    f"{self.hotkeys.toggle} stops for review. "
                    "Apply while stopped; finish capture/recording first.")
         if sys.platform == "darwin":
-            return (f"{hotkeys} Requires Accessibility and Input Monitoring "
-                    "permissions (System Settings → Privacy & Security) for "
-                    f"the app running Python. On Mac keyboards use Fn+{self.hotkeys.toggle}/"
-                    f"Fn+{self.hotkeys.capture} "
-                    "if the F-keys control brightness or volume.")
+            return (f"{hotkeys} macOS: enable Accessibility and Input Monitoring "
+                    "for your Python launcher in System Settings → Privacy & Security. "
+                    f"Use Fn+{self.hotkeys.toggle}/Fn+{self.hotkeys.capture} if needed.")
         return hotkeys
 
     def _show_diagnostics(self) -> None:
