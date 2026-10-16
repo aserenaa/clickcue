@@ -1,5 +1,9 @@
 # Security policy
 
+**Found a vulnerability? [Report it privately](https://github.com/aserenaa/clickcue/security/advisories/new).**
+For ordinary bugs and feature requests, use the
+[issue forms](https://github.com/aserenaa/clickcue/issues/new/choose).
+
 ## Reporting a vulnerability
 
 Use [GitHub private vulnerability reporting](https://github.com/aserenaa/clickcue/security/advisories/new)
