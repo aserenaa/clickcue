@@ -11,7 +11,8 @@ from tkinter import messagebox, simpledialog, ttk
 from pynput import keyboard, mouse
 
 from .events import EventQueue
-from .hotkeys import FUNCTION_KEYS, HotkeySettings, load_hotkeys, save_hotkeys
+from .hotkeys import (FUNCTION_KEYS, HotkeySettings, create_hotkey_listener,
+                      load_hotkeys, save_hotkeys)
 from .models import Step, TargetWindow
 from .platform_support import (accessibility_trusted, find_window,
                                focus_window, focus_window_at, list_windows,
@@ -172,7 +173,7 @@ class ClickCueApp:
         if start_listener:
             # Listener callbacks run on the listener thread; they only enqueue
             # events, which the Tk main loop consumes in _poll_events.
-            self.keyboard_listener = keyboard.Listener(
+            self.keyboard_listener = create_hotkey_listener(
                 on_press=self._on_key, on_release=self._on_key_release)
             self.keyboard_listener.start()
             self.root.after(400, self._check_permissions)

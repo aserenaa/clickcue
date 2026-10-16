@@ -1,14 +1,22 @@
+import ast
 import json
 import queue
 from enum import Enum
+from pathlib import Path
 from threading import Lock, Thread
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 from pynput import keyboard
 
 from clickcue.gui import ClickCueApp
-from clickcue.hotkeys import HotkeySettings, load_hotkeys, save_hotkeys
+from clickcue.hotkeys import (
+    HotkeySettings,
+    create_hotkey_listener,
+    load_hotkeys,
+    save_hotkeys,
+)
 
 
 @pytest.fixture
@@ -44,6 +52,57 @@ def test_held_key_only_fires_once_until_released(app, key, event):
     app._on_key_release(key)
     app._on_key(key)
     assert list(app.events.queue) == [event, event]
+
+
+@pytest.mark.parametrize("key, action", [
+    ("f6", ("hotkey_toggle",)), ("f8", ("hotkey_capture", 12, 34)),
+])
+def test_x11_repeat_device_events_only_fire_once_per_hold(app, monkeypatch, key, action):
+    # Execute the installed dependency's actual dispatcher without importing its
+    # Xorg module (which connects to a display at import time). Only translation
+    # and X protocol constants are synthetic; no mock suppresses repeat events.
+    source = Path(keyboard.__file__).with_name("_xorg.py")
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    listener_class = next(node for node in tree.body
+                          if isinstance(node, ast.ClassDef) and node.name == "Listener")
+    dispatch = next(node for node in listener_class.body
+                    if isinstance(node, ast.FunctionDef) and node.name == "_handle_message")
+    namespace = {"Xlib": SimpleNamespace(X=SimpleNamespace(KeyPress=2, KeyRelease=3))}
+    exec(compile(ast.Module(body=[dispatch], type_ignores=[]), str(source), "exec"), namespace)
+    keys = {72: getattr(keyboard.Key, key), 38: keyboard.KeyCode.from_char("a")}
+    backend = type("Listener", (keyboard.Listener,), {
+        "__module__": "pynput.keyboard._xorg",
+        "_EVENTS": (2, 3),
+        "_handle_message": namespace["_handle_message"],
+        "_event_to_key": lambda self, display, event: keys[event.detail],
+    })
+    monkeypatch.setattr(keyboard, "Listener", backend)
+    release = Mock()
+
+    def on_release(key):
+        release(key)
+        app._on_key_release(key)
+
+    listener = create_hotkey_listener(app._on_key, on_release)
+
+    def send(kind, time, code=72):
+        listener._handle_message(None, SimpleNamespace(type=kind, time=time, detail=code), False)
+
+    send(2, 100)
+    for time in (200, 300):
+        send(3, time)
+        send(2, time)
+    assert list(app.events.queue) == [action]
+    send(3, 400)  # genuine release, followed by a new physical press
+    send(2, 401)
+    assert list(app.events.queue) == [action, action]
+    send(3, 500)
+    send(2, 501, 38)  # another key also flushes a real function-key release
+    send(3, 502, 38)
+    release.assert_called_with(keys[38])  # ordinary text is never buffered
+    assert not app._pressed_keys
+    send(2, 503)
+    assert list(app.events.queue) == [action, action, action]
 
 
 @pytest.mark.parametrize("payload", [

@@ -135,6 +135,8 @@ Under *Global hotkeys (this machine)*, choose separate **F1–F12** keys for
 start/stop and capture, then click *Apply*. Stop playback and finish any armed
 capture before applying changes. Holding a key triggers its action once;
 release it before pressing again. Buttons and hints show the active keys.
+On X11, synthetic auto-repeat release/press pairs are normalized locally;
+your system keyboard repeat settings are unchanged.
 The examples below use the defaults, **F6** and **F8**.
 
 Hotkey preferences are saved atomically in `~/.clickcue/hotkeys.json`, separate
