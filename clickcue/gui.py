@@ -150,6 +150,7 @@ class ClickCueApp:
         self._closed = False
         self._closing = False
         self.capture_armed = False
+        self._preview_active = False
         self.current_profile: str | None = None
         self.imported_profile_name: str | None = None
         self.target_window: TargetWindow | None = None
@@ -290,6 +291,8 @@ class ClickCueApp:
         self.start_button = ttk.Button(control_bar, text=f"▶ Start ({self.hotkeys.toggle})",
                                        command=self._toggle_playback)
         self.start_button.pack(side="left")
+        ttk.Button(control_bar, text="Preview only…",
+                   command=self._preview_sequence).pack(side="left", padx=(6, 0))
         ttk.Label(control_bar, textvariable=self.status_text).pack(
             side="left", padx=(12, 0))
 
@@ -366,6 +369,8 @@ class ClickCueApp:
             if key in self._pressed_keys:
                 return
             self._pressed_keys.add(key)
+            if getattr(self, "_preview_active", False):
+                return
             if key == getattr(keyboard.Key, self.hotkeys.toggle.lower()):
                 self.events.put(("hotkey_toggle",))
             elif key == getattr(keyboard.Key, self.hotkeys.capture.lower()):
@@ -390,6 +395,9 @@ class ClickCueApp:
 
     def _handle_event(self, event: tuple) -> None:
         kind = event[0]
+        if (getattr(self, "_preview_active", False)
+                and kind in ("hotkey_toggle", "hotkey_capture")):
+            return
         if kind == "prepared":
             self._finish_preparation(event[1])
         elif kind == "close_cancelled":
@@ -482,6 +490,27 @@ class ClickCueApp:
             self._update_target_text()
 
     # ------------------------------------------------------------- playback
+
+    def _preview_sequence(self) -> None:
+        if self.player is not None or self.capture_armed:
+            messagebox.showinfo("Preview only", "Stop playback and finish capture "
+                                "before previewing.", parent=self.root)
+            return
+        if not any(not step.wait_only for step in self.steps):
+            messagebox.showinfo("No click positions", "Add a click step to preview "
+                                "its position. Empty and wait-only sequences "
+                                "have no click positions.", parent=self.root)
+            return
+        self._preview_active = True
+        try:
+            show_preview(self.root, [replace(step) for step in self.steps])
+        except (OverflowError, ValueError):
+            messagebox.showerror(
+                "Preview unavailable", "The recorded coordinates are too large to "
+                "display. Edit the click coordinates and try previewing again. "
+                "No input was sent.", parent=self.root)
+        finally:
+            self._preview_active = False
 
     def _toggle_playback(self) -> None:
         if self._closed:
