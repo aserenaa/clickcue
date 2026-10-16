@@ -155,7 +155,9 @@ need their own.
 4. Choose *Loop forever* or a repeat count.
 5. Press *▶ Start* or hit **F6**. ClickCue focuses the target window, restores
    its recorded position/size if it moved, then plays the sequence. **F6**
-   stops it at any moment.
+   stops playback, cancelling a pending click after the guard returns or during
+   the wait before pressing. If the mouse button is already held, stopping
+   releases it promptly. A press already being sent to the OS may still occur.
 6. Save the sequence as a profile (*Save As…*) and reload it from the
    dropdown. *New* starts a fresh sequence.
 
