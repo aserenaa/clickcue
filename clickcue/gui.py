@@ -659,13 +659,23 @@ class ClickCueApp:
 
     def _write_profile(self, name: str) -> None:
         first = next((step for step in self.steps if not step.wait_only), None)
-        if self.target_window is None and first is not None:
-            self.target_window = window_info_at(first.x, first.y)
+        target_window = self.target_window
+        if target_window is None and first is not None:
+            target_window = window_info_at(first.x, first.y)
         profile = Profile(name=name, steps=list(self.steps),
                           loop_forever=self.loop_forever.get(),
                           repetitions=self._repetition_count(),
-                          target_window=self.target_window)
-        self.store.save(profile)
+                          target_window=target_window)
+        try:
+            self.store.save(profile)
+        except OSError as exc:
+            messagebox.showerror(
+                "Save failed",
+                f"Could not save profile “{name}”: {exc}\n\n"
+                "Your changes are still unsaved. Check the profile folder's "
+                "permissions and available disk space, then try again.")
+            return
+        self.target_window = target_window
         self.current_profile = name
         self.dirty = False
         self._refresh_profile_list()
@@ -682,7 +692,14 @@ class ClickCueApp:
         if not messagebox.askyesno("Delete profile",
                                    f"Delete profile “{name}”?"):
             return
-        self.store.delete(name)
+        try:
+            self.store.delete(name)
+        except OSError as exc:
+            messagebox.showerror(
+                "Delete failed",
+                f"Could not delete profile “{name}”: {exc}\n\n"
+                "Check the profile folder's permissions, then try again.")
+            return
         if name == self.current_profile:
             self.current_profile = None
             self.dirty = bool(self.steps)

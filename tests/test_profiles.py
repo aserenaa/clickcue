@@ -1,3 +1,7 @@
+import os
+
+import pytest
+
 from clickcue.models import Step, TargetWindow
 from clickcue.profiles import Profile, ProfileStore
 
@@ -45,6 +49,26 @@ def test_save_overwrites_existing(tmp_path):
 
     assert store.load("Alpha").steps == updated.steps
     assert store.list_names() == ["Alpha"]
+
+
+def test_failed_replacement_preserves_saved_profile(tmp_path, monkeypatch):
+    store = ProfileStore(tmp_path)
+    original = make_profile("Alpha")
+    store.save(original)
+    saved_bytes = (tmp_path / "Alpha.json").read_bytes()
+    updated = make_profile("Alpha")
+    updated.steps = []
+
+    def deny_replace(source, destination):
+        raise PermissionError("Profile is read-only")
+
+    monkeypatch.setattr(os, "replace", deny_replace)
+    with pytest.raises(PermissionError, match="read-only"):
+        store.save(updated)
+
+    assert (tmp_path / "Alpha.json").read_bytes() == saved_bytes
+    assert store.load("Alpha") == original
+    assert list(tmp_path.iterdir()) == [tmp_path / "Alpha.json"]
 
 
 def test_filenames_are_sanitized(tmp_path):
