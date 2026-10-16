@@ -157,10 +157,11 @@ def test_large_font_rows_fit_text_and_window_can_grow(app, request):
         row = app.tree.bbox(app.tree.get_children()[0])
         assert row and row[1] + row[3] <= app.tree.winfo_height()
         table_heights.append(app.tree.winfo_height())
-        diagnostics = next(w for w in app.start_button.master.winfo_children()
-                           if w.cget("text").startswith("Diagnostics"))
-        for control in (app.start_button, diagnostics, app.run_selected_button, app.pause_button):
+        for control in app.start_button.master.winfo_children():
             assert control.winfo_ismapped()
+            assert control.winfo_rootx() >= app.root.winfo_rootx()
+            assert control.winfo_rootx() + control.winfo_width() <= (
+                app.root.winfo_rootx() + app.root.winfo_width())
             assert control.winfo_rooty() >= app.root.winfo_rooty()
             assert control.winfo_rooty() + control.winfo_height() <= (
                 app.root.winfo_rooty() + app.root.winfo_height())

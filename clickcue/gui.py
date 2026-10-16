@@ -337,19 +337,17 @@ class ClickCueApp:
         self.start_button = ttk.Button(control_bar, text=f"▶ Start ({self.hotkeys.toggle})",
                                        command=self._toggle_playback)
         self.start_button.pack(side="left")
+        self.run_selected_button = ttk.Button(
+            control_bar, text="Run selected steps", command=self._run_selected)
+        self.run_selected_button.pack(side="left", padx=(6, 0))
+        self.pause_button = ttk.Button(
+            control_bar, text="Pause", command=self._toggle_pause, state="disabled")
+        self.pause_button.pack(side="left", padx=(6, 0))
+
         ttk.Button(control_bar, text="Preview only…",
                    command=self._preview_sequence).pack(side="left", padx=(6, 0))
         ttk.Button(control_bar, text="Diagnostics…",
                    command=self._show_diagnostics).pack(side="left", padx=(6, 0))
-        selected_bar = ttk.Frame(footer)
-        selected_bar.pack(fill="x", pady=(10, 0))
-        self.run_selected_button = ttk.Button(
-            selected_bar, text="Run selected steps", command=self._run_selected)
-        self.run_selected_button.pack(side="left")
-        self.pause_button = ttk.Button(
-            selected_bar, text="Pause", command=self._toggle_pause, state="disabled")
-        self.pause_button.pack(side="left", padx=(6, 0))
-
         status_label = ttk.Label(footer, textvariable=self.status_text, wraplength=580)
         status_label.pack(fill="x", pady=(6, 0))
         status_label.bind("<Configure>", lambda event:
