@@ -173,7 +173,8 @@ copy, remove, and reorder, including multiple selected steps). Windows/Linux:
 **Ctrl+Z** / **Ctrl+Y**; macOS: **Command+Z** / **Shift+Command+Z**. Shortcuts
 leave text fields and dialogs to their native editing controls. Undo/redo is
 unavailable during playback or while capture is armed. A new sequence edit clears
-redo; New and opening another profile clear both histories. Settings and target
+redo; New, opening another profile, and successful imports clear both histories.
+Cancelled or invalid imports preserve history. Settings and target
 window changes are outside this history. Undo/redo marks the profile unsaved,
 even when the sequence returns to its saved content; save again to clear the mark.
 

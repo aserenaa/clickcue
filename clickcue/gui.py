@@ -750,6 +750,7 @@ class ClickCueApp:
         self._loading = True
         try:
             self.steps = profile.steps
+            self._reset_history()
             self.loop_forever.set(profile.loop_forever)
             self.repetitions.set(str(profile.repetitions))
             self.target_window = profile.target_window

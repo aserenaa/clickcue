@@ -278,3 +278,97 @@ def test_history_retains_only_the_latest_hundred_edits(monkeypatch):
     for _ in range(105):
         app._redo()
     assert len(app.steps) == 110
+
+
+@pytest.mark.parametrize("outcome", ["success", "invalid", "cancel_file", "cancel_discard"])
+@pytest.mark.parametrize("dirty", [False, True])
+def test_import_history_boundary_through_editor_callback(tmp_path, monkeypatch, outcome, dirty):
+    from clickcue.profiles import Profile, ProfileStore
+
+    app = editor([1])
+    app._copy_step()
+    app._copy_step()
+    app._undo()  # Both undo and redo are available before the import.
+    app.current_profile = "Original"
+    app.imported_profile_name = None
+    app.dirty = dirty
+    app.store = ProfileStore(tmp_path / "local")
+    app.store.save(Profile("Original", steps=app.steps))
+    saved_file = app.store.directory / "Original.json"
+    saved_bytes = saved_file.read_bytes()
+    app.loop_forever = Mock()
+    app.repetitions = Mock()
+    app.status_text = Mock()
+    app._refresh_profile_list = Mock()
+    app._update_target_text = Mock()
+    external = tmp_path / "download.json"
+    external.write_text(
+        '{"name":"Imported","steps":[{"name":"Pause","x":0,"y":0,"delay":2}]}'
+        if outcome != "invalid" else '{"name":"Invalid","schema_version":999}',
+        encoding="utf-8")
+    monkeypatch.setattr("clickcue.gui.filedialog.askopenfilename", Mock(
+        return_value="" if outcome == "cancel_file" else str(external)))
+    monkeypatch.setattr("clickcue.gui.messagebox.showerror", Mock())
+    # A clean editor has no discard prompt, so exercise that cancellation only
+    # when the editor has unsaved changes.
+    monkeypatch.setattr("clickcue.gui.messagebox.askyesno", Mock(
+        return_value=outcome != "cancel_discard"))
+
+    app._import_profile()
+
+    replaced = outcome == "success" or (outcome == "cancel_discard" and not dirty)
+    assert saved_file.read_bytes() == saved_bytes
+    if replaced:
+        assert app.current_profile is None
+        assert app.imported_profile_name == "Imported"
+        assert app.dirty
+        app._undo()
+        assert app.steps == [Step("Pause", 0, 0, 2)]
+        app._redo()
+        assert app.steps == [Step("Pause", 0, 0, 2)]
+        assert app.dirty
+    else:
+        assert app.current_profile == "Original"
+        assert app.imported_profile_name is None
+        assert app.dirty == dirty
+        assert [s.name for s in app.steps] == list("ABBCDE")
+        app._redo()
+        assert [s.name for s in app.steps] == list("ABBBCDE")
+        app._undo()
+        app._undo()
+        app._undo()
+        assert [s.name for s in app.steps] == list("ABCDE")
+        assert app.dirty  # History restoration remains conservatively unsaved.
+
+
+@pytest.mark.parametrize("dirty", [False, True])
+def test_export_preserves_sequence_history(tmp_path, monkeypatch, dirty):
+    from clickcue.profiles import read_profile
+
+    app = editor([1])
+    app._copy_step()
+    app._copy_step()
+    app._undo()
+    app.current_profile = "Original"
+    app.dirty = dirty
+    app.target_window = None
+    app.loop_forever = Mock()
+    app.loop_forever.get.return_value = True
+    app._repetition_count = Mock(return_value=1)
+    app.status_text = Mock()
+    external = tmp_path / "export.json"
+    monkeypatch.setattr("clickcue.gui.filedialog.asksaveasfilename", Mock(
+        return_value=str(external)))
+
+    app._export_profile()
+
+    assert [s.name for s in read_profile(external).steps] == list("ABBCDE")
+    assert app.current_profile == "Original"
+    assert app.dirty == dirty
+    app._redo()
+    assert [s.name for s in app.steps] == list("ABBBCDE")
+    app._undo()
+    app._undo()
+    app._undo()
+    assert [s.name for s in app.steps] == list("ABCDE")
+    assert app.dirty
