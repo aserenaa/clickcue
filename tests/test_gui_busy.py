@@ -11,19 +11,8 @@ from clickcue.preparation import PreparationResult
 from clickcue.profiles import Profile, ProfileStore
 
 
-@pytest.fixture(scope="session")
-def runtime():
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:
-        pytest.skip(f"Tk unavailable: {exc}")
-    root.withdraw()
-    yield root
-    root.destroy()
-
-
 @pytest.fixture
-def editor(runtime, tmp_path, monkeypatch):
+def editor(tk_runtime, tmp_path, monkeypatch):
     store = ProfileStore(tmp_path / "profiles")
     store.save(Profile("Original", [Step("First", 1, 2, 0), Step("Second", 3, 4, 0)]))
     monkeypatch.setattr("clickcue.gui.ProfileStore", lambda: store)
@@ -35,7 +24,7 @@ def editor(runtime, tmp_path, monkeypatch):
     monkeypatch.setattr("clickcue.gui.messagebox.showwarning", Mock())
     monkeypatch.setattr("clickcue.gui.messagebox.showinfo", Mock())
     monkeypatch.setattr("clickcue.gui.messagebox.askyesno", Mock(return_value=True))
-    root = tk.Toplevel(runtime)
+    root = tk.Toplevel(tk_runtime)
     root.withdraw()
     app = ClickCueApp(root, start_listener=False)
     app.profile_selection.set("Original")
@@ -88,7 +77,8 @@ def test_busy_callbacks_preserve_editor_and_profile_files(editor, monkeypatch, t
     monkeypatch.setattr("clickcue.gui.filedialog.askopenfilename", lambda **k: str(incoming))
     app.profile_selection.set("Changed")
     for action in (app._add_step, app._edit_step, app._copy_step, app._remove_step,
-                   lambda: app._move_step(1), app._undo, app._redo, app._arm_capture,
+                   lambda: app._move_step(1), lambda: app._move_step(-1),
+                   app._undo, app._redo, app._arm_capture,
                    app._choose_target_window, app._clear_target_window, app._new_profile,
                    app._open_selected_profile, app._save_profile, app._save_profile_as,
                    app._delete_profile, app._import_profile,
@@ -131,7 +121,8 @@ def test_controls_stay_locked_until_completion_and_restore(editor, outcome):
     app = editor
     controls = [button(app, prefix) for prefix in
                 ("New", "Save", "Delete", "Import", "Choose", "Clear", "Capture",
-                 "Add", "Edit", "Copy", "Remove", "Undo", "Redo", "Apply")]
+                 "Add", "Edit", "Copy", "Remove", "Move up", "Move down",
+                 "Undo", "Redo", "Apply")]
     controls += [w for w in widgets(app.root) if w.winfo_class() in
                  ("TCombobox", "TRadiobutton", "TSpinbox")]
     app._toggle_playback()

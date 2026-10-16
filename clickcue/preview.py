@@ -11,7 +11,6 @@ def show_preview(parent: tk.Tk, steps: list[Step]) -> None:
     dialog = tk.Toplevel(parent)
     try:
         dialog.title("Preview only — no input sent")
-        dialog.resizable(False, False)
         body = ttk.Frame(dialog, padding=12)
         body.pack(fill="both", expand=True)
         ttk.Label(body, text="Preview only — no clicks, pointer movement, or window changes.\n"
@@ -48,7 +47,7 @@ def show_preview(parent: tk.Tk, steps: list[Step]) -> None:
                   ).pack(anchor="w", pady=(4, 8))
 
         table_frame = ttk.Frame(body)
-        table_frame.pack(fill="x")
+        table_frame.pack(fill="both", expand=True)
         table = ttk.Treeview(table_frame, columns=("step", "name", "position", "delay"),
                              show="headings", height=6)
         for column, heading, size in [("step", "#", 40), ("name", "Name", 180),
@@ -58,7 +57,7 @@ def show_preview(parent: tk.Tk, steps: list[Step]) -> None:
             table.column(column, width=size, anchor="w")
         scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=table.yview)
         table.configure(yscrollcommand=scrollbar.set)
-        table.pack(side="left", fill="x", expand=True)
+        table.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         for number, step in enumerate(steps, 1):
             position = "Wait only — no click" if step.wait_only else f"({step.x}, {step.y})"
@@ -68,6 +67,8 @@ def show_preview(parent: tk.Tk, steps: list[Step]) -> None:
         dialog.bind("<Escape>", lambda _event: dialog.destroy())
         dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
         dialog.transient(parent)
+        dialog.update_idletasks()
+        dialog.minsize(dialog.winfo_reqwidth(), dialog.winfo_reqheight())
         dialog.grab_set()
         close.focus_set()
         dialog.wait_window()

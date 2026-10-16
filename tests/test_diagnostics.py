@@ -10,17 +10,6 @@ from clickcue.models import TargetWindow
 from clickcue.profiles import ProfileStore
 
 
-@pytest.fixture(scope="session")
-def tk_runtime():
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:
-        pytest.skip(f"Tk unavailable: {exc}")
-    root.withdraw()
-    yield root
-    root.destroy()
-
-
 @pytest.fixture
 def app(tmp_path, monkeypatch, tk_runtime):
     root = tk.Toplevel(tk_runtime)
