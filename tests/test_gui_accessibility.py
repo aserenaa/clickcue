@@ -12,17 +12,6 @@ from clickcue.models import Step, TargetWindow
 from clickcue.profiles import ProfileStore
 
 
-@pytest.fixture(scope="module")
-def tk_runtime():
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:
-        pytest.skip(f"Tk unavailable: {exc}")
-    root.withdraw()
-    yield root
-    root.destroy()
-
-
 @pytest.fixture
 def app(monkeypatch, tmp_path, tk_runtime):
     root = tk.Toplevel(tk_runtime)
@@ -122,8 +111,10 @@ def test_dialog_initial_focus_is_in_dialog_and_cancel_return_does_not_accept(
     assert not dialog.winfo_exists()
 
 
-def test_large_font_rows_fit_text_and_window_can_grow(app):
+def test_large_font_rows_fit_text_and_window_can_grow(app, request):
     default_font = font.nametofont("TkDefaultFont", root=app.root)
+    original = default_font.actual()
+    request.addfinalizer(lambda: default_font.configure(**original))
     default_font.configure(size=18)
     # Rebuild after choosing a system font size, as at application startup.
     for child in app.root.winfo_children():
