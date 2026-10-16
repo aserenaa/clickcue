@@ -376,17 +376,30 @@ class ClickCueApp:
             self._pressed_keys.discard(key)
 
     def _poll_events(self) -> None:
+        if self._closed:
+            return
+        # Dialogs run a nested Tk loop. Keep polling there so a queued Stop
+        # cancels the active preparation before its completion handler returns.
+        self.root.after(EVENT_POLL_MS, self._poll_events)
         try:
             for _ in range(MAX_EVENTS_PER_POLL):
                 self._handle_event(self.events.get_nowait())
         except queue.Empty:
             pass
-        self.root.after(EVENT_POLL_MS, self._poll_events)
 
     def _handle_event(self, event: tuple) -> None:
         kind = event[0]
         if kind == "prepared":
             self._finish_preparation(event[1])
+        elif kind == "preparation_stopped":
+            _, preparation, status = event
+            if self._closed or preparation is not self._preparation:
+                return
+            self._preparation = None
+            self.start_button.configure(
+                text=f"▶ Start ({self.hotkeys.toggle})", state="normal")
+            self.status_text.set(
+                "Stopped" if preparation.windows.cancelled.is_set() else status)
         elif kind == "hotkey_toggle":
             self._toggle_playback()
         elif kind == "hotkey_capture":
@@ -510,13 +523,14 @@ class ClickCueApp:
         # Dialogs run a nested Tk loop; Stop or Close may have occurred there.
         if self._closed or preparation is not self._preparation:
             return
-        self._preparation = None
-        self.start_button.configure(text=f"▶ Start ({self.hotkeys.toggle})", state="normal")
         if not accepted or windows.cancelled.is_set() or prepared is None:
-            self.status_text.set(
-                prepared.status if prepared is not None and prepared.missing_target
-                and not windows.cancelled.is_set() else "Stopped")
+            status = (prepared.status if prepared is not None and prepared.missing_target
+                      else "Stopped")
+            # Keep the run active until hotkeys queued during the dialog have
+            # been consumed, including Stop queued just before dismissal.
+            self.events.put(("preparation_stopped", preparation, status))
             return
+        self._preparation = None
         self._blocked_status = None
         self.player = Player(prepared.steps, preparation.loop_forever,
                              preparation.repetitions, self.events,

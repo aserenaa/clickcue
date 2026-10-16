@@ -29,6 +29,7 @@ def test_progress_bursts_keep_latest_and_preserve_durable_events():
 
 def test_poll_yields_with_continuous_events_and_eventually_delivers_all():
     app = object.__new__(ClickCueApp)
+    app._closed = False
     app.root = Mock()
     app.events = queue.Queue()
     received = []

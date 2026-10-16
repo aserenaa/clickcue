@@ -1,11 +1,12 @@
 import queue
 import threading
+import tkinter as tk
 from copy import deepcopy
 from unittest.mock import Mock
 
 import pytest
 
-from clickcue.gui import ClickCueApp
+from clickcue.gui import EVENT_POLL_MS, ClickCueApp
 from clickcue.hotkeys import HotkeySettings
 from clickcue.models import Step, TargetWindow
 
@@ -63,7 +64,9 @@ def test_missing_target_blocks_playback_without_changing_saved_state(monkeypatch
     monkeypatch.setattr("clickcue.gui.Player", player)
 
     app._toggle_playback()
-    app._handle_event(app.events.get(timeout=2))
+    completion = app.events.get(timeout=2)
+    app.events.put(completion)
+    app._poll_events()
 
     assert app.player is None
     player.assert_not_called()
@@ -94,7 +97,9 @@ def test_clear_anchor_or_wait_only_sequence_can_start(monkeypatch, app, wait_onl
     monkeypatch.setattr("clickcue.gui.Player", player)
 
     app._toggle_playback()
-    app._handle_event(app.events.get(timeout=2))
+    completion = app.events.get(timeout=2)
+    app.events.put(completion)
+    app._poll_events()
 
     warning.assert_not_called()
     assert app.player is player.return_value
@@ -165,7 +170,50 @@ def test_blocked_preparation_keeps_ui_responsive_and_discards_cancelled_results(
                 from clickcue.gui import messagebox
                 messagebox.showerror.assert_called_once()
             app._toggle_playback()
-            app._handle_event(app.events.get(timeout=2))
+            completion = app.events.get(timeout=2)
+            app.events.put(completion)
+            app._poll_events()
             player.assert_called_once()
     finally:
         release.set()
+
+
+def test_stop_during_preparation_error_dialog_does_not_restart(app, monkeypatch):
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("Tk display unavailable")
+    root.withdraw()
+    app.root = root
+    find = Mock(side_effect=[RuntimeError("OS failure"), TargetWindow("Target")])
+    monkeypatch.setattr("clickcue.preparation.find_window", find)
+    player = Mock()
+    monkeypatch.setattr("clickcue.gui.Player", player)
+    dialogs = []
+
+    def show_error(*args):
+        # Use a real Tk modal loop and enqueue the listener's event at dismissal;
+        # production polling and completion handling retain ownership of Stop.
+        dialog = tk.Toplevel(root)
+        dialogs.append(dialog)
+        dialog.grab_set()
+
+        def dismiss():
+            app.events.put(("hotkey_toggle",))
+            dialog.destroy()
+
+        root.after(3 * EVENT_POLL_MS, dismiss)
+        root.wait_window(dialog)
+
+    monkeypatch.setattr("clickcue.gui.messagebox.showerror", show_error)
+    try:
+        app._toggle_playback()
+        app._poll_events()
+        root.after(1000, root.quit)
+        root.mainloop()
+        assert len(dialogs) == 1
+        assert find.call_count == 1
+        player.assert_not_called()
+        assert app._preparation is None
+    finally:
+        app._on_close()
