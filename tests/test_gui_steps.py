@@ -45,6 +45,9 @@ class Tree:
     def see(self, item):
         self.visible = item
 
+    def focus(self, item):
+        self.focused = item
+
 
 def editor(selection):
     app = ClickCueApp.__new__(ClickCueApp)

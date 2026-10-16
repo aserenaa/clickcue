@@ -6,7 +6,7 @@ import tkinter as tk
 from dataclasses import replace
 from pathlib import Path
 from threading import Lock
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, font, messagebox, simpledialog, ttk
 
 from pynput import keyboard, mouse
 
@@ -35,11 +35,13 @@ class StepDialog(tk.Toplevel):
     def __init__(self, parent: tk.Tk, title: str, step: Step | None = None):
         super().__init__(parent)
         self.title(title)
-        self.resizable(False, False)
         self.result: Step | None = None
 
         body = ttk.Frame(self, padding=12)
-        body.grid()
+        body.grid(sticky="nsew")
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
         self.fields = {
             "name": tk.StringVar(value=step.name if step else ""),
             "x": tk.StringVar(value=str(step.x) if step else "0"),
@@ -52,11 +54,11 @@ class StepDialog(tk.Toplevel):
         for row, (label, key) in enumerate(rows):
             ttk.Label(body, text=label).grid(row=row, column=0, sticky="w", pady=2)
             entry = ttk.Entry(body, textvariable=self.fields[key], width=22)
-            entry.grid(row=row, column=1, pady=2, padx=(8, 0))
+            entry.grid(row=row, column=1, sticky="ew", pady=2, padx=(8, 0))
             if key in ("x", "y"):
                 self.coordinate_entries.append(entry)
             if row == 0:
-                entry.focus_set()
+                first_entry = entry
 
         self.wait_only = tk.BooleanVar(value=step.wait_only if step else False)
         ttk.Checkbutton(body, text="Wait only (no click)",
@@ -69,12 +71,17 @@ class StepDialog(tk.Toplevel):
         buttons.grid(row=len(rows) + 1, column=0, columnspan=2, pady=(10, 0))
         ttk.Button(buttons, text="OK", command=self._accept).grid(
             row=0, column=0, padx=4)
-        ttk.Button(buttons, text="Cancel", command=self.destroy).grid(
-            row=0, column=1, padx=4)
+        cancel = ttk.Button(buttons, text="Cancel", command=self.destroy)
+        cancel.grid(row=0, column=1, padx=4)
+        cancel.bind("<Return>", lambda _event: self.destroy() or "break")
 
         self.bind("<Return>", lambda _event: self._accept())
         self.bind("<Escape>", lambda _event: self.destroy())
         self.transient(parent)
+        self.update_idletasks()
+        self.minsize(self.winfo_reqwidth(), self.winfo_reqheight())
+        self.wait_visibility()
+        first_entry.focus_set()
         self.grab_set()
         self.wait_window()
 
@@ -100,7 +107,6 @@ class WindowPickerDialog(tk.Toplevel):
     def __init__(self, parent: tk.Tk):
         super().__init__(parent)
         self.title("Choose target window")
-        self.resizable(False, False)
         self.result: TargetWindow | None = None
         self.windows = list_windows()
 
@@ -109,12 +115,24 @@ class WindowPickerDialog(tk.Toplevel):
         ttk.Label(body, text="Clicks will be anchored to this window's "
                              "position and size:").pack(anchor="w")
 
-        self.listbox = tk.Listbox(body, width=48, height=12)
+        list_frame = ttk.Frame(body)
+        list_frame.pack(fill="both", expand=True, pady=(8, 0))
+        self.listbox = tk.Listbox(list_frame, width=48, height=12,
+                                 exportselection=False)
         for window in self.windows:
             self.listbox.insert(
                 "end", f"{window.app} - {window.title or window.native_id or 'window'}  "
                        f"({window.x}, {window.y}; {window.width}×{window.height})")
-        self.listbox.pack(pady=(8, 0))
+        vertical = ttk.Scrollbar(list_frame, command=self.listbox.yview)
+        horizontal = ttk.Scrollbar(list_frame, orient="horizontal",
+                                   command=self.listbox.xview)
+        self.listbox.configure(yscrollcommand=vertical.set,
+                               xscrollcommand=horizontal.set)
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+        self.listbox.grid(row=0, column=0, sticky="nsew")
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal.grid(row=1, column=0, sticky="ew")
         self.listbox.bind("<Double-1>", lambda _event: self._accept())
         if self.windows:
             self.listbox.selection_set(0)
@@ -123,12 +141,17 @@ class WindowPickerDialog(tk.Toplevel):
         buttons.pack(pady=(10, 0))
         ttk.Button(buttons, text="OK", command=self._accept).grid(
             row=0, column=0, padx=4)
-        ttk.Button(buttons, text="Cancel", command=self.destroy).grid(
-            row=0, column=1, padx=4)
+        cancel = ttk.Button(buttons, text="Cancel", command=self.destroy)
+        cancel.grid(row=0, column=1, padx=4)
+        cancel.bind("<Return>", lambda _event: self.destroy() or "break")
 
         self.bind("<Return>", lambda _event: self._accept())
         self.bind("<Escape>", lambda _event: self.destroy())
         self.transient(parent)
+        self.update_idletasks()
+        self.minsize(self.winfo_reqwidth(), self.winfo_reqheight())
+        self.wait_visibility()
+        self.listbox.focus_set()
         self.grab_set()
         self.wait_window()
 
@@ -142,7 +165,6 @@ class WindowPickerDialog(tk.Toplevel):
 class ClickCueApp:
     def __init__(self, root: tk.Tk, start_listener: bool = True):
         self.root = root
-        self.root.minsize(620, 540)
 
         self.steps: list[Step] = []
         self._undo_history: list[SequenceSnapshot] = []
@@ -236,7 +258,11 @@ class ClickCueApp:
 
         target_bar = ttk.LabelFrame(main, text="Target window", padding=8)
         target_bar.pack(fill="x", pady=(10, 0))
-        ttk.Label(target_bar, textvariable=self.target_text).pack(side="left")
+        target_label = ttk.Label(target_bar, textvariable=self.target_text,
+                                 wraplength=300)
+        target_label.pack(side="left", fill="x", expand=True)
+        target_label.bind("<Configure>", lambda event:
+                          target_label.configure(wraplength=max(1, event.width)))
         ttk.Button(target_bar, text="Clear",
                    command=self._clear_target_window).pack(side="right")
         ttk.Button(target_bar, text="Choose…",
@@ -247,7 +273,12 @@ class ClickCueApp:
         table_frame.pack(fill="both", expand=True, pady=(10, 0))
         columns = ("index", "name", "action", "x", "y", "delay")
         self.tree = ttk.Treeview(table_frame, columns=columns,
-                                 show="headings", selectmode="extended")
+                                 show="headings", selectmode="extended", height=6)
+        style = ttk.Style(self.root)
+        tree_font = font.Font(root=self.root,
+                              font=style.lookup("Treeview", "font") or "TkDefaultFont")
+        row_height = tree_font.metrics("linespace") + 8
+        style.configure("Treeview", rowheight=row_height)
         for column, heading, width in [("index", "#", 36),
                                        ("name", "Name", 220),
                                        ("action", "Action", 60),
@@ -262,8 +293,13 @@ class ClickCueApp:
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         self.tree.bind("<Double-1>", lambda _event: self._edit_step())
+        for key in ("Up", "Down", "space", "a"):
+            self.tree.bind(f"<Control-{key}>", self._step_selection_shortcut)
 
-        step_bar = ttk.Frame(main)
+        # Allocate fixed controls first, retaining the table's earlier Tab order.
+        footer = ttk.Frame(main)
+        footer.pack(side="bottom", fill="x", before=table_frame)
+        step_bar = ttk.Frame(footer)
         step_bar.pack(fill="x", pady=(8, 0))
         self.capture_button = ttk.Button(
             step_bar, text=f"Capture ({self.hotkeys.capture})",
@@ -272,19 +308,19 @@ class ClickCueApp:
         for label, command in [("Add", self._add_step),
                                ("Edit", self._edit_step),
                                ("Copy", self._copy_step),
-                               ("Remove", self._remove_step),
-                               ("▲", lambda: self._move_step(-1)),
-                               ("▼", lambda: self._move_step(1))]:
+                               ("Remove", self._remove_step)]:
             ttk.Button(step_bar, text=label, command=command).pack(
                 side="left", padx=(0, 4))
 
-        history_bar = ttk.Frame(main)
+        history_bar = ttk.Frame(footer)
         history_bar.pack(fill="x", pady=(4, 0))
-        for label, command in [("Undo", self._undo), ("Redo", self._redo)]:
+        for label, command in [("Move up", lambda: self._move_step(-1)),
+                               ("Move down", lambda: self._move_step(1)),
+                               ("Undo", self._undo), ("Redo", self._redo)]:
             ttk.Button(history_bar, text=label, command=command).pack(
                 side="left", padx=(0, 4))
 
-        loop_bar = ttk.LabelFrame(main, text="Playback", padding=8)
+        loop_bar = ttk.LabelFrame(footer, text="Playback", padding=8)
         loop_bar.pack(fill="x", pady=(10, 0))
         ttk.Radiobutton(loop_bar, text="Loop forever",
                         variable=self.loop_forever, value=True).pack(side="left")
@@ -294,7 +330,7 @@ class ClickCueApp:
                     width=6).pack(side="left")
         ttk.Label(loop_bar, text="times").pack(side="left", padx=(4, 0))
 
-        control_bar = ttk.Frame(main)
+        control_bar = ttk.Frame(footer)
         control_bar.pack(fill="x", pady=(10, 0))
         self.start_button = ttk.Button(control_bar, text=f"▶ Start ({self.hotkeys.toggle})",
                                        command=self._toggle_playback)
@@ -303,10 +339,12 @@ class ClickCueApp:
                    command=self._preview_sequence).pack(side="left", padx=(6, 0))
         ttk.Button(control_bar, text="Diagnostics…",
                    command=self._show_diagnostics).pack(side="left", padx=(6, 0))
-        ttk.Label(control_bar, textvariable=self.status_text).pack(
-            side="left", padx=(12, 0))
+        status_label = ttk.Label(footer, textvariable=self.status_text, wraplength=580)
+        status_label.pack(fill="x", pady=(6, 0))
+        status_label.bind("<Configure>", lambda event:
+                          status_label.configure(wraplength=max(1, event.width)))
 
-        hotkey_bar = ttk.LabelFrame(main, text="Global hotkeys (this machine)", padding=8)
+        hotkey_bar = ttk.LabelFrame(footer, text="Global hotkeys (this machine)", padding=8)
         hotkey_bar.pack(fill="x", pady=(10, 0))
         self.toggle_key = tk.StringVar(value=self.hotkeys.toggle)
         self.capture_key = tk.StringVar(value=self.hotkeys.capture)
@@ -318,9 +356,15 @@ class ClickCueApp:
         self.hotkey_apply_button = ttk.Button(
             hotkey_bar, text="Apply", command=self._apply_hotkeys)
         self.hotkey_apply_button.pack(side="left")
-        self.hotkey_hint = ttk.Label(main, text=self._hint_text(), wraplength=580,
-                                     foreground="gray")
+        self.hotkey_hint = ttk.Label(footer, text=self._hint_text(), wraplength=580)
         self.hotkey_hint.pack(fill="x", pady=(10, 0))
+        self.hotkey_hint.bind("<Configure>", lambda event:
+                              self.hotkey_hint.configure(wraplength=max(1, event.width)))
+        self.root.update_idletasks()
+        # Keep controls and a small table viewport available on smaller displays.
+        spare_rows = int(self.tree.cget("height")) - 1
+        self.root.minsize(max(620, main.winfo_reqwidth()),
+                          main.winfo_reqheight() - spare_rows * row_height)
 
         # Keep read-only export, profile diagnostics, and the control bar usable.
         editing_bars = (profile_controls, target_bar, step_bar, history_bar,
@@ -667,6 +711,22 @@ class ClickCueApp:
 
     # ----------------------------------------------------------------- steps
 
+    def _step_selection_shortcut(self, event) -> str:
+        children = self.tree.get_children()
+        if not children:
+            return "break"
+        item = self.tree.focus() or children[0]
+        if event.keysym == "a":
+            self.tree.selection_set(children)
+        elif event.keysym == "space":
+            self.tree.selection_toggle(item)
+        else:
+            index = children.index(item) + (-1 if event.keysym == "Up" else 1)
+            item = children[max(0, min(len(children) - 1, index))]
+        self.tree.focus(item)
+        self.tree.see(item)
+        return "break"
+
     def _sequence_snapshot(self) -> SequenceSnapshot:
         return ([replace(step) for step in self.steps],
                 sorted(self.tree.index(item) for item in self.tree.selection()))
@@ -700,6 +760,7 @@ class ClickCueApp:
         children = self.tree.get_children()
         self.tree.selection_set([children[index] for index in selection])
         if selection:
+            self.tree.focus(children[selection[0]])
             self.tree.see(children[selection[0]])
         # Settings/target edits are outside history: never infer a clean profile.
         self._mark_dirty()
@@ -771,6 +832,7 @@ class ClickCueApp:
         self._refresh_table()
         children = self.tree.get_children()
         self.tree.selection_set(children[insert_at:insert_at + len(copies)])
+        self.tree.focus(children[insert_at])
         self.tree.see(children[insert_at])
 
     def _move_step(self, offset: int) -> None:
@@ -797,6 +859,7 @@ class ClickCueApp:
         self._refresh_table()
         children = self.tree.get_children()
         self.tree.selection_set([children[index] for index in sorted(indices)])
+        self.tree.focus(children[min(indices)])
         self.tree.see(children[moved_to])
 
     def _selected_index(self) -> int | None:
@@ -814,7 +877,11 @@ class ClickCueApp:
                                                 "—" if step.wait_only else step.y,
                                                 step.delay))
         if select is not None and 0 <= select < len(self.steps):
-            self.tree.selection_set(self.tree.get_children()[select])
+            item = self.tree.get_children()[select]
+            self.tree.selection_set(item)
+            self.tree.focus(item)
+        elif self.steps:
+            self.tree.focus(self.tree.get_children()[0])
 
     def _highlight_step(self, index: int | None) -> None:
         if index is not None and index == self._highlighted_step:

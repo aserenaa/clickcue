@@ -186,17 +186,6 @@ def test_blocked_preparation_keeps_ui_responsive_and_discards_cancelled_results(
         release.set()
 
 
-@pytest.fixture(scope="module")
-def tk_runtime():
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:
-        pytest.skip(f"Tk unavailable: {exc}")
-    root.withdraw()
-    yield root
-    root.destroy()
-
-
 @pytest.fixture
 def tk_root(app, tk_runtime):
     # Keep one Tcl/Tk interpreter; close each app window independently.
