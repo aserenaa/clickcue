@@ -201,6 +201,17 @@ Wait-only steps do not check window coverage, and automatic target detection
 uses the first click step. Blocked clicks report the coordinates checked and
 the detected window so misplaced click points can be diagnosed.
 
+Profile and step names must be nonempty. Delays must be finite, nonnegative
+numbers; coordinates must be integers (negative coordinates are supported for
+secondary screens). Repeat counts must be positive integers, and boolean
+fields must use JSON `true` or `false`, not strings. Invalid profiles report
+the offending field and, for steps, its position starting at 1.
+
+Target bounds must either all be absent/null or include integer `x`, `y`,
+`width`, and `height`, with positive dimensions. Legacy `target_app` profiles
+remain supported; missing loop settings default to looping forever with a
+repeat count of 1, and missing steps default to an empty list.
+
 </details>
 
 ## Platform support

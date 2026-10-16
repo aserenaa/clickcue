@@ -79,18 +79,13 @@ class StepDialog(tk.Toplevel):
 
     def _accept(self) -> None:
         try:
-            name = self.fields["name"].get().strip()
-            x = 0 if self.wait_only.get() else int(self.fields["x"].get())
-            y = 0 if self.wait_only.get() else int(self.fields["y"].get())
-            delay = float(self.fields["delay"].get())
-            if not name:
-                raise ValueError("Name cannot be empty")
-            if delay < 0:
-                raise ValueError("Delay cannot be negative")
+            step = Step.from_fields(
+                *(self.fields[field].get() for field in ("name", "x", "y", "delay")),
+                wait_only=self.wait_only.get())
         except ValueError as exc:
             messagebox.showerror("Invalid input", str(exc), parent=self)
             return
-        self.result = Step(name, x, y, delay, wait_only=self.wait_only.get())
+        self.result = step
         self.destroy()
 
 
@@ -316,7 +311,7 @@ class ClickCueApp:
             if self.capture_armed:
                 self.capture_armed = False
                 self._refresh_target_bounds()
-                self._add_step(prefill=Step("", event[1], event[2], 1.0))
+                self._add_step(prefill=Step("New step", event[1], event[2], 1.0))
         elif kind in ("waiting", "playing"):
             _, repetition, index, name = event[:4]
             total = "∞" if self.loop_forever.get() else self.repetitions.get()
