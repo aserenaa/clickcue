@@ -1,12 +1,13 @@
 import queue
 import threading
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 from clickcue.models import Step, TargetWindow
 from clickcue.playback import Player
-from clickcue.preparation import WindowPlayback
+from clickcue.preparation import PlaybackPreparation, WindowPlayback
 
 
 @pytest.fixture
@@ -32,6 +33,24 @@ def test_wait_only_preparation_does_not_touch_windows(preparation, anchor):
     assert result.status == "Playing waits…"
     assert not result.missing_target
     for operation in preparation.values():
+        operation.assert_not_called()
+
+
+@pytest.mark.parametrize("anchor,platform,reason", [
+    (None, "win32", "target_window"),
+    (TargetWindow("Target"), "linux", "unsupported"),
+])
+def test_condition_preflight_rejects_missing_target_or_unsupported_platform(
+        windows, monkeypatch, anchor, platform, reason):
+    monkeypatch.setattr("clickcue.preparation.sys", SimpleNamespace(platform=platform))
+    preparation = PlaybackPreparation(
+        [Step("Available", 0, 0, 0, True, "target_window_ready", 1),
+         Step("Click", 1, 2, 0)], anchor, False, 1, queue.Queue())
+    preparation.run()
+    assert isinstance(preparation.error, ValueError)
+    assert reason in str(preparation.error)
+    assert preparation.result is None
+    for operation in windows.values():
         operation.assert_not_called()
 
 

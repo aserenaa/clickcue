@@ -9,8 +9,8 @@ class EventQueue(queue.Queue[tuple]):
     def _put(self, item: tuple) -> None:
         # Queue calls this hook under its mutex. Never coalesce across a durable
         # event, so progress cannot move past a stop, error, or hotkey.
-        if (item[0] in ("waiting", "playing") and self.queue
-                and self.queue[-1][0] in ("waiting", "playing")):
+        if (item[0] in ("waiting", "playing", "condition_waiting") and self.queue
+                and self.queue[-1][0] in ("waiting", "playing", "condition_waiting")):
             self.queue[-1] = item
             # Queue.put increments this after _put, even for a replacement.
             self.unfinished_tasks -= 1

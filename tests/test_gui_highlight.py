@@ -33,16 +33,19 @@ def app(monkeypatch):
     return app
 
 
-def test_countdown_updates_status_without_touching_same_row(app):
-    app._handle_event(("waiting", 1, 0, "First", 2.0))
+@pytest.mark.parametrize("kind", ["waiting", "condition_waiting"])
+def test_countdown_updates_status_without_touching_same_row(app, kind):
+    app._handle_event((kind, 1, 0, "First", 2.0))
     app.tree.selection_set.assert_called_once_with("first")
     app.tree.focus.assert_called_once_with("first")
     app.tree.see.assert_called_once_with("first")
     app.tree.reset_mock()
 
     for remaining in (1.5, 1.0, 0.5):
-        app._handle_event(("waiting", 1, 0, "First", remaining))
-        assert f"waiting {remaining:.1f}s" in app.status_text.set.call_args.args[0]
+        app._handle_event((kind, 1, 0, "First", remaining))
+        expected = (f"waiting {remaining:.1f}s" if kind == "waiting" else
+                    f"waiting for target window; timeout in {remaining:.1f}s")
+        assert expected in app.status_text.set.call_args.args[0]
     app._handle_event(("playing", 1, 0, "First"))
 
     app.tree.get_children.assert_not_called()
@@ -67,6 +70,18 @@ def test_highlight_tracks_transitions_repeats_and_stop_restart(app):
     app.tree.selection_set.assert_not_called()
     app._handle_event(("waiting", 1, 0, "First", 2.0))
     app.tree.selection_set.assert_called_once_with("first")
+
+
+def test_timeout_reason_survives_stopped_event(app, monkeypatch):
+    error = Mock()
+    monkeypatch.setattr("clickcue.gui.messagebox.showerror", error)
+    message = "Available: timed out waiting for the target window"
+    app._handle_event(("error", message))
+    app._handle_event(("stopped",))
+    assert message in app.status_text.set.call_args.args[0]
+    assert message in app._last_stop
+    assert app._last_error == message
+    assert message in error.call_args.args[1]
 
 
 @pytest.mark.parametrize("select", [None, 0, 1])

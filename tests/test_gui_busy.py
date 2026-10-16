@@ -199,7 +199,7 @@ def test_dialog_completion_cannot_mutate_after_start(editor, monkeypatch, tmp_pa
         app._toggle_playback()
         return result
 
-    monkeypatch.setattr("clickcue.gui.StepDialog", lambda *args: start(Mock(result=Step("Changed", 4, 5, 0))))
+    monkeypatch.setattr("clickcue.gui.StepDialog", lambda *args, **kwargs: start(Mock(result=Step("Changed", 4, 5, 0))))
     monkeypatch.setattr("clickcue.gui.WindowPickerDialog", lambda *args: start(Mock(result=TargetWindow("Changed"))))
     monkeypatch.setattr("clickcue.gui.simpledialog.askstring", lambda *a, **k: start("Changed"))
     monkeypatch.setattr("clickcue.gui.messagebox.askyesno", lambda *a, **k: start(True))
@@ -265,7 +265,7 @@ def test_selected_run_snapshots_order_settings_and_original_progress_rows(editor
     assert Player.call_args.kwargs["guard"].__self__ is preparation.windows
     app.player.paused = False
     for repetition, index, row in ((1, 0, rows[0]), (1, 1, rows[2]), (2, 0, rows[0])):
-        app._handle_event(("playing", repetition, index, "Selected"))
+        app._handle_event(("condition_waiting", repetition, index, "Selected", 2.0))
         assert app.tree.selection() == (row,)
         assert app.tree.focus() == row
         assert f"step {app.tree.index(row) + 1}:" in app.status_text.get()

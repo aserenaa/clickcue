@@ -32,10 +32,12 @@ SequenceSnapshot = tuple[list[Step], list[int]]
 class StepDialog(tk.Toplevel):
     """Modal dialog to create or edit a step."""
 
-    def __init__(self, parent: tk.Tk, title: str, step: Step | None = None):
+    def __init__(self, parent: tk.Tk, title: str, step: Step | None = None,
+                 *, target_available: bool = False):
         super().__init__(parent)
         self.title(title)
         self.result: Step | None = None
+        self.target_available = target_available
 
         body = ttk.Frame(self, padding=12)
         body.grid(sticky="nsew")
@@ -46,13 +48,17 @@ class StepDialog(tk.Toplevel):
             "name": tk.StringVar(value=step.name if step else ""),
             "x": tk.StringVar(value=str(step.x) if step else "0"),
             "y": tk.StringVar(value=str(step.y) if step else "0"),
-            "delay": tk.StringVar(value=str(step.delay) if step else "1.0"),
+            "delay": tk.StringVar(value=str(step.timeout if step.wait_condition else step.delay)
+                                  if step else "1.0"),
         }
         rows = [("Name", "name"), ("X", "x"), ("Y", "y"),
                 ("Delay (s)", "delay")]
         self.coordinate_entries = []
         for row, (label, key) in enumerate(rows):
-            ttk.Label(body, text=label).grid(row=row, column=0, sticky="w", pady=2)
+            label_widget = ttk.Label(body, text=label)
+            label_widget.grid(row=row, column=0, sticky="w", pady=2)
+            if key == "delay":
+                self.timing_label = label_widget
             entry = ttk.Entry(body, textvariable=self.fields[key], width=22)
             entry.grid(row=row, column=1, sticky="ew", pady=2, padx=(8, 0))
             if key in ("x", "y"):
@@ -60,11 +66,15 @@ class StepDialog(tk.Toplevel):
             if row == 0:
                 first_entry = entry
 
-        self.wait_only = tk.BooleanVar(value=step.wait_only if step else False)
-        ttk.Checkbutton(body, text="Wait only (no click)",
-                        variable=self.wait_only,
-                        command=self._update_coordinates).grid(
-            row=len(rows), column=0, columnspan=2, sticky="w", pady=(6, 0))
+        mode = ("Wait for target window" if step and step.wait_condition else
+                "Fixed wait" if step and step.wait_only else "Click")
+        self.mode = tk.StringVar(value=mode)
+        ttk.Label(body, text="Action").grid(row=len(rows), column=0, sticky="w", pady=(6, 0))
+        chooser = ttk.Combobox(body, textvariable=self.mode, state="readonly",
+                               values=("Click", "Fixed wait", "Wait for target window"),
+                               width=24)
+        chooser.grid(row=len(rows), column=1, sticky="ew", padx=(8, 0), pady=(6, 0))
+        chooser.bind("<<ComboboxSelected>>", lambda _event: self._update_coordinates())
         self._update_coordinates()
 
         buttons = ttk.Frame(body)
@@ -87,13 +97,19 @@ class StepDialog(tk.Toplevel):
 
     def _update_coordinates(self) -> None:
         for entry in self.coordinate_entries:
-            entry.configure(state="disabled" if self.wait_only.get() else "normal")
+            entry.configure(state="normal" if self.mode.get() == "Click" else "disabled")
+        self.timing_label.configure(text="Timeout (s)" if self.mode.get() == "Wait for target window"
+                                    else "Delay (s)")
 
     def _accept(self) -> None:
         try:
+            condition = ("target_window_ready" if self.mode.get() == "Wait for target window"
+                         else None)
             step = Step.from_fields(
                 *(self.fields[field].get() for field in ("name", "x", "y", "delay")),
-                wait_only=self.wait_only.get())
+                wait_only=self.mode.get() != "Click", wait_condition=condition)
+            if condition and not self.target_available:
+                raise ValueError("target_window: choose a target window before adding this wait")
         except ValueError as exc:
             messagebox.showerror("Invalid input", str(exc), parent=self)
             return
@@ -283,9 +299,9 @@ class ClickCueApp:
         style.configure("Treeview", rowheight=row_height)
         for column, heading, width in [("index", "#", 36),
                                        ("name", "Name", 220),
-                                       ("action", "Action", 60),
+                                       ("action", "Action", max(60, tree_font.measure("Wait for target") + 16)),
                                        ("x", "X", 70), ("y", "Y", 70),
-                                       ("delay", "Delay (s)", 80)]:
+                                       ("delay", "Timing (s)", max(80, tree_font.measure("Timeout 999.9s") + 16))]:
             self.tree.heading(column, text=heading)
             self.tree.column(column, width=width,
                              anchor="w" if column == "name" else "center")
@@ -556,7 +572,7 @@ class ClickCueApp:
                 self.capture_armed = False
                 self._refresh_target_bounds()
                 self._add_step(prefill=Step("New step", event[1], event[2], 1.0))
-        elif kind in ("waiting", "playing"):
+        elif kind in ("waiting", "playing", "condition_waiting"):
             if self._pending_control is not None or (self.player is not None and self.player.paused):
                 return
             _, repetition, index, name = event[:4]
@@ -564,6 +580,8 @@ class ClickCueApp:
                 index = self._run_indices[index]
             total = "∞" if self.loop_forever.get() else self.repetitions.get()
             countdown = f" — waiting {event[4]:.1f}s" if kind == "waiting" else ""
+            if kind == "condition_waiting":
+                countdown = f" — waiting for target window; timeout in {event[4]:.1f}s"
             self.status_text.set(
                 f"Playing — run {repetition}/{total}, "
                 f"step {index + 1}: {name}{countdown}")
@@ -586,12 +604,13 @@ class ClickCueApp:
                 f"detected: {covering}")
         elif kind == "error":
             self._last_error = str(event[1])
+            self._blocked_status = self._blocked_status or f"Stopped — {event[1]}"
             hint = ""
             if sys.platform == "darwin":
                 hint = ("\n\nCheck that the app running Python has the "
                         "Accessibility permission in System Settings → "
                         "Privacy & Security.")
-            messagebox.showerror("Click failed", f"{event[1]}{hint}")
+            messagebox.showerror("Playback failed", f"{event[1]}{hint}")
 
     def _check_permissions(self) -> None:
         if accessibility_trusted(prompt=True):
@@ -764,7 +783,9 @@ class ClickCueApp:
         self._blocked_status = None
         self.player = Player(prepared.steps, preparation.loop_forever,
                              preparation.repetitions, self.events,
-                             guard=windows.guard)
+                             guard=windows.guard, target_probe=windows.probe_target,
+                             prepare_clicks=(lambda identity, cancelled, admit: windows.prepare_deferred(
+                                 prepared.steps, identity, cancelled, admit)) if preparation.deferred else None)
         self._update_editing_controls()
         self.player.start()
         self.start_button.configure(text=f"■ Stop ({self.hotkeys.toggle})")
@@ -852,7 +873,8 @@ class ClickCueApp:
     def _add_step(self, prefill: Step | None = None) -> None:
         if self._editing_blocked():
             return
-        dialog = StepDialog(self.root, "Add step", prefill)
+        dialog = StepDialog(self.root, "Add step", prefill,
+                            target_available=self.target_window is not None)
         if dialog.result and not self._editing_blocked():
             before = self._sequence_snapshot()
             self.steps.append(dialog.result)
@@ -865,7 +887,8 @@ class ClickCueApp:
         index = self._selected_index()
         if index is None:
             return
-        dialog = StepDialog(self.root, "Edit step", self.steps[index])
+        dialog = StepDialog(self.root, "Edit step", self.steps[index],
+                            target_available=self.target_window is not None)
         if (not self._editing_blocked() and dialog.result
                 and dialog.result != self.steps[index]):
             before = self._sequence_snapshot()
@@ -939,10 +962,12 @@ class ClickCueApp:
         self.tree.delete(*self.tree.get_children())
         for index, step in enumerate(self.steps):
             self.tree.insert("", "end", values=(index + 1, step.name,
+                                                "Wait for target" if step.wait_condition else
                                                 "Wait" if step.wait_only else "Click",
                                                 "—" if step.wait_only else step.x,
                                                 "—" if step.wait_only else step.y,
-                                                step.delay))
+                                                f"Timeout {step.timeout:g}s" if step.wait_condition
+                                                else step.delay))
         if select is not None and 0 <= select < len(self.steps):
             item = self.tree.get_children()[select]
             self.tree.selection_set(item)
@@ -1100,13 +1125,13 @@ class ClickCueApp:
         target_window = self.target_window
         if target_window is None and first is not None:
             target_window = window_info_at(first.x, first.y)
-        profile = Profile(name=name, steps=list(self.steps),
-                          loop_forever=self.loop_forever.get(),
-                          repetitions=self._repetition_count(),
-                          target_window=target_window)
         try:
+            profile = Profile(name=name, steps=list(self.steps),
+                              loop_forever=self.loop_forever.get(),
+                              repetitions=self._repetition_count(),
+                              target_window=target_window)
             self.store.save(profile)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             messagebox.showerror(
                 "Save failed",
                 f"Could not save profile “{name}”: {exc}\n\n"

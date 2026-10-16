@@ -16,7 +16,7 @@ from .models import (
 )
 
 DEFAULT_DIR = Path.home() / ".clickcue" / "profiles"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass
@@ -42,6 +42,8 @@ class Profile:
                 step.__post_init__()
             except ValueError as exc:
                 raise ValueError(f"steps[{index}].{exc}") from exc
+            if step.wait_condition is not None and self.target_window is None:
+                raise ValueError(f"steps[{index}].target_window: is required for a condition wait")
         if self.target_window is not None:
             if not isinstance(self.target_window, TargetWindow):
                 raise ValueError("target_window: must be a target window")
@@ -97,8 +99,12 @@ class Profile:
             if not isinstance(raw, dict):
                 raise ValueError(f"steps[{index}]: must be an object")
             try:
+                if version < 2 and (raw.get("wait_condition") is not None
+                                    or raw.get("timeout") is not None):
+                    raise ValueError("schema_version: condition waits require version 2")
                 steps.append(Step(raw["name"], raw["x"], raw["y"],
-                                  raw["delay"], raw.get("wait_only", False)))
+                                  raw["delay"], raw.get("wait_only", False),
+                                  raw.get("wait_condition"), raw.get("timeout")))
             except KeyError as exc:
                 raise ValueError(f"steps[{index}].{exc.args[0]}: is required") from exc
             except ValueError as exc:

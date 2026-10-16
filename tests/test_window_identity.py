@@ -3,6 +3,8 @@ import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from clickcue import platform_support as platform
 from clickcue.models import Step, TargetWindow
 from clickcue.preparation import WindowPlayback
@@ -15,6 +17,30 @@ def test_legacy_resolution_requires_a_unique_window(monkeypatch):
     assert platform.find_window("Editor") is None
     windows.pop()
     assert platform.find_window("Editor") is windows[0]
+
+
+@pytest.mark.parametrize("selected", [False, True])
+def test_target_probe_observes_unique_identity_without_native_actions(monkeypatch, selected):
+    target = TargetWindow("Editor", 0, 0, 100, 100, native_id=11, pid=101)
+    other = TargetWindow("Editor", 0, 0, 100, 100, native_id=12, pid=101)
+    windows = []
+    monkeypatch.setattr("clickcue.preparation.sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(platform, "list_windows", lambda: list(windows))
+    monkeypatch.setattr("clickcue.preparation.find_window", platform.find_window)
+    for name in ("focus_window", "focus_window_at", "move_window", "window_info_at"):
+        monkeypatch.setattr(f"clickcue.preparation.{name}",
+                            Mock(side_effect=AssertionError("Probe must only observe")))
+    playback = WindowPlayback(target if selected else TargetWindow("Editor"))
+    assert playback.probe_target(None) is None
+    windows.extend([target, other])
+    assert playback.probe_target(None) is (target if selected else None)
+    windows[:] = [target]
+    resolved = playback.probe_target(None)
+    assert resolved is target
+    windows[:] = [other]
+    assert playback.probe_target(resolved) is None  # Never replace accepted live identity.
+    if selected:
+        assert playback.probe_target(None) is None  # Nor replace a selected closed window.
 
 
 def test_guard_rejects_another_window_of_the_selected_app(monkeypatch):

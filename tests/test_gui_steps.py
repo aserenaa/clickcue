@@ -55,6 +55,7 @@ def editor(selection):
                  for index, name in enumerate("ABCDE")]
     app.tree = Tree()
     app.root = Mock()
+    app.target_window = None
     app.root.tk.call.return_value = ""
     app._editing_controls = []
     app.run_selected_button = Mock()
@@ -339,7 +340,7 @@ def test_unchanged_dialog_and_boundary_move_keep_redo_and_clean_state(monkeypatc
     app._copy_step()
     app._undo()
     app.dirty = False
-    monkeypatch.setattr("clickcue.gui.StepDialog", lambda *args: Mock(result=Step("A", 0, 10, 0, True)))
+    monkeypatch.setattr("clickcue.gui.StepDialog", lambda *args, **kwargs: Mock(result=Step("A", 0, 10, 0, True)))
     app._edit_step()
     app._move_step(-1)
     assert not app.dirty
@@ -370,7 +371,7 @@ def test_add_capture_and_edit_round_trip(monkeypatch):
     results = iter([Step("Added", 10, 20, 1), None,
                     Step("Edited", 3, 4, 5)])
 
-    def dialog(_parent, _title, prefill=None):
+    def dialog(_parent, _title, prefill=None, **kwargs):
         result = next(results)
         if result is None:
             result = replace(prefill, name="Captured", delay=2)
@@ -443,7 +444,7 @@ def test_history_shortcuts_leave_text_and_dialogs_alone(widget_class, dialog, gr
 
 def test_history_retains_only_the_latest_hundred_edits(monkeypatch):
     app = editor([])
-    monkeypatch.setattr("clickcue.gui.StepDialog", lambda *args: Mock(result=Step("New", 1, 2, 0)))
+    monkeypatch.setattr("clickcue.gui.StepDialog", lambda *args, **kwargs: Mock(result=Step("New", 1, 2, 0)))
     for _ in range(105):
         app._add_step()
     for _ in range(105):

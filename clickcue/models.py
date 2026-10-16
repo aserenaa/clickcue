@@ -23,13 +23,15 @@ def validate_boolean(value: object, field: str) -> None:
 
 @dataclass
 class Step:
-    """A named click with a preceding delay, or a delay without a click."""
+    """A click, fixed wait, or bounded wait for the profile's target window."""
 
     name: str
     x: int
     y: int
     delay: float
     wait_only: bool = False
+    wait_condition: str | None = None
+    timeout: float | None = None
 
     def __post_init__(self) -> None:
         validate_name(self.name, "name")
@@ -43,10 +45,27 @@ class Step:
         if not valid_delay:
             raise ValueError("delay: must be a finite nonnegative number")
         validate_boolean(self.wait_only, "wait_only")
+        if self.wait_condition is None:
+            if self.timeout is not None:
+                raise ValueError("timeout: requires a wait_condition")
+            return
+        if self.wait_condition != "target_window_ready":
+            raise ValueError("wait_condition: must be target_window_ready")
+        if not self.wait_only:
+            raise ValueError("wait_only: must be true for a condition wait")
+        if self.delay != 0:
+            raise ValueError("delay: must be zero for a condition wait")
+        try:
+            valid_timeout = (self.timeout is not None and type(self.timeout) in (int, float)
+                             and self.timeout > 0 and isfinite(self.timeout))
+        except OverflowError:
+            valid_timeout = False
+        if not valid_timeout:
+            raise ValueError("timeout: must be a finite positive number")
 
     @classmethod
     def from_fields(cls, name: str, x: str, y: str, delay: str,
-                    wait_only: bool) -> "Step":
+                    wait_only: bool, wait_condition: str | None = None) -> "Step":
         """Parse dialog text, then use the same validation as loaded steps."""
         coordinates = []
         for field, value in (("x", x), ("y", y)):
@@ -57,7 +76,11 @@ class Step:
         try:
             seconds = float(delay)
         except ValueError as exc:
-            raise ValueError("delay: must be a finite nonnegative number") from exc
+            field = "timeout" if wait_condition else "delay"
+            raise ValueError(f"{field}: must be a finite number") from exc
+        if wait_condition is not None:
+            return cls(name.strip(), coordinates[0], coordinates[1], 0,
+                       wait_only, wait_condition, seconds)
         return cls(name.strip(), coordinates[0], coordinates[1], seconds, wait_only)
 
 

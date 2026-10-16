@@ -39,7 +39,12 @@ for next time. **F6** starts or stops playback even when another app has focus.
 - 🎯 **Named steps** — every click has a name ("Button 1", "Close menu"), screen
   coordinates, and a delay in seconds before it fires.
 - ⏳ **Wait-only steps** — pause without moving the pointer or clicking. In the
-  Add/Edit dialog, enable *Wait only (no click)* and enter the delay.
+  Add/Edit dialog, choose *Fixed wait* and enter the delay.
+- **Wait for target window** — choose this action and enter a positive timeout
+  in seconds. It waits until the saved target resolves uniquely to a live
+  window, without moving the pointer, clicking, focusing, or moving windows
+  during the wait. This establishes availability, not application responsiveness
+  or visual readiness. Choose a target window before adding the step.
 - **Preview only** — while stopped and capture is not armed, choose **Preview
   only…** to see numbered click positions on a scaled coordinate map, with
   names, exact recorded coordinates, and delays below. Negative coordinates
@@ -179,7 +184,7 @@ that do not conflict with shortcuts in your target app or operating system.
    point, and press **F8**. A dialog opens with the coordinates pre-filled;
    give the step a name and a delay. Don't move the target window while
    capturing — the anchor bounds are refreshed on each capture. For a pause
-   without a click, use *Add* and enable *Wait only (no click)*; coordinates
+   without a click, use *Add* and choose *Fixed wait*; coordinates
    are ignored. A normal click step still clicks after its delay expires.
 3. Add, edit (double-click or *Edit*), remove, and reorder (*Move up* / *Move down*) steps as needed.
    *Remove* deletes all selected steps. The move buttons move each selected group one
@@ -318,12 +323,13 @@ remain available while you repair the others.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "Game A - farming",
   "loop_forever": true,
   "repetitions": 1,
   "target_window": { "app": "Some Game", "x": 40, "y": 60, "width": 1280, "height": 720 },
   "steps": [
+    { "name": "Target available", "x": 0, "y": 0, "delay": 0, "wait_only": true, "wait_condition": "target_window_ready", "timeout": 30 },
     { "name": "Button 1", "x": 512, "y": 384, "delay": 1.5 },
     { "name": "Pause", "x": 0, "y": 0, "delay": 210, "wait_only": true }
   ]
@@ -342,6 +348,22 @@ Wait-only steps do not check window coverage, and automatic target detection
 uses the first click step. Blocked clicks report the coordinates checked and
 the detected window so misplaced click points can be diagnosed.
 
+Condition waits use `wait_condition: "target_window_ready"`, `wait_only: true`,
+`delay: 0`, and a finite positive `timeout` in seconds. A target is required.
+Missing or ambiguous windows never satisfy the condition; timeout stops the run
+without executing later steps. Unsupported platforms reject the wait. Pause
+freezes its remaining timeout and Resume checks availability again. A selected
+live window retains its identity: closing it does not authorize a replacement
+window with the same name. Imported profiles resolve their saved application
+name or title only when exactly one live window matches.
+
+When a condition precedes the first click, target preparation happens after the
+wait and before that click. Focus, restoration or coordinate adjustment and
+the normal per-click coverage guard still apply. A condition succeeding does
+not authorize a later click if its target disappears or becomes covered.
+Forever loops still require a click or a positive fixed delay: an already
+satisfied condition can complete immediately.
+
 Profile and step names must be nonempty. Delays must be finite, nonnegative
 numbers; coordinates must be integers (negative coordinates are supported for
 secondary screens). Repeat counts must be positive integers, and boolean
@@ -352,8 +374,11 @@ Target bounds must either all be absent/null or include integer `x`, `y`,
 `width`, and `height`, with positive dimensions. Legacy `target_app` profiles
 remain supported; missing loop settings default to looping forever with a
 repeat count of 1, and missing steps default to an empty list.
-New saves and exports include `schema_version: 1`. Unversioned files and
-version `0` remain supported with the same legacy defaults. The version must
+New saves and exports include `schema_version: 2`, so older ClickCue releases
+reject them instead of silently ignoring a condition. Unversioned files and
+versions `0` and `1` remain supported with the same legacy defaults. Condition
+fields require version `2`; ordinary steps default to no condition or timeout.
+The version must
 be a nonnegative JSON integer (not a boolean); newer unsupported versions
 are rejected with an error rather than interpreted as an older format.
 

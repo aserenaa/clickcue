@@ -27,7 +27,62 @@ def test_save_and_load_round_trip(tmp_path):
 
     loaded = store.load(profile.name)
     assert loaded == profile
-    assert json.loads((tmp_path / f"{profile.name}.json").read_text())["schema_version"] == 1
+    assert json.loads((tmp_path / f"{profile.name}.json").read_text())["schema_version"] == 2
+
+
+def test_target_wait_round_trip_and_legacy_defaults(tmp_path):
+    payload = {
+        "schema_version": 2, "name": "Wait for window",
+        "target_window": {"app": "Example"},
+        "steps": [{"name": "Available", "x": 0, "y": 0, "delay": 0,
+                   "wait_only": True, "wait_condition": "target_window_ready",
+                   "timeout": 2.5}],
+    }
+    store = ProfileStore(tmp_path)
+    profile = Profile.from_dict(payload)
+    store.save(profile)
+    loaded = store.load(profile.name)
+    assert loaded.steps[0].wait_condition == "target_window_ready"
+    assert loaded.steps[0].timeout == 2.5
+    for version in (0, 1):
+        legacy = Profile.from_dict({"schema_version": version, "name": "Old",
+                                   "steps": [{"name": "Click", "x": 1, "y": 2,
+                                              "delay": 3}]})
+        assert legacy.steps == [Step("Click", 1, 2, 3)]
+        assert legacy.steps[0].wait_condition is None
+        assert legacy.steps[0].timeout is None
+
+
+@pytest.mark.parametrize("changes,field", [
+    ({"timeout": value}, "timeout")
+    for value in (None, 0, -1, True, "2", float("nan"), float("inf"), 10 ** 400)
+] + [
+    ({"wait_condition": "unknown"}, "wait_condition"),
+    ({"wait_condition": None}, "timeout"),
+    ({"wait_only": False}, "wait_only"),
+    ({"delay": 1}, "delay"),
+])
+def test_target_wait_import_rejects_invalid_combinations(changes, field):
+    step = {"name": "Available", "x": 0, "y": 0, "delay": 0,
+            "wait_only": True, "wait_condition": "target_window_ready", "timeout": 2}
+    step.update(changes)
+    with pytest.raises(ValueError, match=rf"steps\[1\].{field}"):
+        Profile.from_dict({"schema_version": 2, "name": "Invalid",
+                           "target_window": {"app": "Example"}, "steps": [step]})
+
+
+def test_target_wait_requires_target_and_schema_two():
+    payload = {"schema_version": 2, "name": "Invalid",
+               "steps": [{"name": "Available", "x": 0, "y": 0, "delay": 0,
+                          "wait_only": True, "wait_condition": "target_window_ready",
+                          "timeout": 2}]}
+    with pytest.raises(ValueError, match="target_window"):
+        Profile.from_dict(payload)
+    payload["target_window"] = {"app": "Example"}
+    for version in (0, 1):
+        payload["schema_version"] = version
+        with pytest.raises(ValueError, match="schema_version"):
+            Profile.from_dict(payload)
 
 
 def test_save_supports_long_filename_accepted_by_filesystem(tmp_path):
@@ -195,7 +250,7 @@ def test_target_window_bounds_helpers():
     ([], "profile"),
     ({}, "name"),
     *[({"name": "Test", "schema_version": value}, "schema_version")
-      for value in (-1, True, 1.0, "1", None, 2)],
+      for value in (-1, True, 1.0, "1", None, 3)],
     ({"name": " "}, "name"),
     ({"name": "Test", "steps": {}}, "steps"),
     ({"name": "Test", "steps": None}, "steps"),
