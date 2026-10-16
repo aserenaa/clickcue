@@ -121,12 +121,12 @@ def test_blocked_preparation_keeps_ui_responsive_and_discards_cancelled_results(
 
     def find_window(name):
         assert threading.current_thread() is not ui_thread
-        calls.append(name)
+        calls.append(name.app)
         entered.set()
         assert release.wait(2), "test did not release blocked OS call"
         if action == "error" and len(calls) == 1:
             raise RuntimeError("OS failure")
-        return TargetWindow(name)
+        return TargetWindow(name.app)
 
     monkeypatch.setattr("clickcue.preparation.find_window", find_window)
     player = Mock()
@@ -247,7 +247,7 @@ def test_dirty_close_cancels_preparation_before_confirmation(
     def find_window(name):
         entered.set()
         assert release.wait(2), "test did not release blocked OS call"
-        return TargetWindow(name)
+        return TargetWindow(name.app)
 
     monkeypatch.setattr("clickcue.preparation.find_window", find_window)
     player = Mock()

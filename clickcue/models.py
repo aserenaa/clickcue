@@ -1,6 +1,7 @@
 """Data model for click sequences."""
 
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from math import isfinite
 
 
@@ -72,6 +73,15 @@ class TargetWindow:
     y: int | None = None
     width: int | None = None
     height: int | None = None
+
+    # Live OS identity only; profiles deliberately omit these fields.
+    native_id: int | None = dataclass_field(default=None, compare=False, repr=False)
+    pid: int | None = dataclass_field(default=None, compare=False, repr=False)
+    title: str | None = dataclass_field(default=None, compare=False)
+
+    def same_window(self, other: "TargetWindow") -> bool:
+        return (self.native_id is not None and self.pid is not None
+                and (self.native_id, self.pid) == (other.native_id, other.pid))
 
     def __post_init__(self) -> None:
         validate_name(self.app, "app")

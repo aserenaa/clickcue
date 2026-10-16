@@ -56,7 +56,8 @@ class Profile:
             "name": self.name,
             "loop_forever": self.loop_forever,
             "repetitions": self.repetitions,
-            "target_window": (asdict(self.target_window)
+            "target_window": ({key: value for key, value in asdict(self.target_window).items()
+                               if key not in ("native_id", "pid", "title")}
                               if self.target_window else None),
             "steps": [asdict(step) for step in self.steps],
         }
@@ -78,7 +79,9 @@ class Profile:
             if not isinstance(raw_target, dict):
                 raise ValueError("target_window: must be an object")
             try:
-                target = TargetWindow(**raw_target)
+                # Native IDs from any imported file are never trusted.
+                target = TargetWindow(**{key: value for key, value in raw_target.items()
+                                         if key not in ("native_id", "pid", "title")})
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"target_window.{exc}") from exc
         elif data.get("target_app") is not None:  # ClickCue < 0.2
