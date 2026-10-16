@@ -24,6 +24,7 @@ def app(monkeypatch):
     app._preparation = None
     app._closed = False
     app._closing = False
+    app._preview_active = False
     app.steps = [Step("Click", 17, 29, 0)]
     app.target_window = TargetWindow("Target")
     app.loop_forever = Mock()

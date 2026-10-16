@@ -18,6 +18,7 @@ from .platform_support import (accessibility_trusted, find_window,
                                list_windows, window_info_at)
 from .playback import Player
 from .preparation import PlaybackPreparation
+from .preview import show_preview
 from .profiles import Profile, ProfileStore, read_profile, write_profile
 
 APP_NAME = "ClickCue"
@@ -400,6 +401,8 @@ class ClickCueApp:
             return
         if kind == "prepared":
             self._finish_preparation(event[1])
+        elif kind == "preview_closed":
+            self._preview_active = False
         elif kind == "close_cancelled":
             self._closing = False
         elif kind == "preparation_stopped":
@@ -492,7 +495,10 @@ class ClickCueApp:
     # ------------------------------------------------------------- playback
 
     def _preview_sequence(self) -> None:
-        if self.player is not None or self.capture_armed:
+        if self._closed or self._closing:
+            return
+        if (self.player is not None or self.capture_armed
+                or self._preparation is not None or self._preview_active):
             messagebox.showinfo("Preview only", "Stop playback and finish capture "
                                 "before previewing.", parent=self.root)
             return
@@ -510,7 +516,8 @@ class ClickCueApp:
                 "display. Edit the click coordinates and try previewing again. "
                 "No input was sent.", parent=self.root)
         finally:
-            self._preview_active = False
+            # Retain the guard until pending modal hotkeys have been consumed.
+            self.events.put(("preview_closed",))
 
     def _toggle_playback(self) -> None:
         if self._closed:
@@ -523,7 +530,7 @@ class ClickCueApp:
         if self.player is not None:
             self.player.stop()
             return
-        if self._closing:
+        if self._closing or self._preview_active:
             return
         if not self.steps:
             messagebox.showinfo("No steps",
