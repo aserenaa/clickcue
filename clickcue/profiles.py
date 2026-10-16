@@ -78,7 +78,7 @@ class ProfileStore:
         try:
             with tempfile.NamedTemporaryFile(
                     mode="w", encoding="utf-8", dir=path.parent,
-                    prefix=f".{path.name}.", suffix=".tmp", delete=False) as stream:
+                    prefix=".clickcue-", suffix=".tmp", delete=False) as stream:
                 temporary = Path(stream.name)
                 stream.write(payload)
             os.replace(temporary, path)

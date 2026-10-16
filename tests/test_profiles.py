@@ -27,6 +27,27 @@ def test_save_and_load_round_trip(tmp_path):
     assert loaded == profile
 
 
+def test_save_supports_long_filename_accepted_by_filesystem(tmp_path):
+    # Discover the directory's actual path/component limit, including on Windows.
+    for length in range(250, 0, -1):
+        name = "p" * length
+        path = tmp_path / f"{name}.json"
+        try:
+            path.write_text("{}", encoding="utf-8")
+        except OSError:
+            continue
+        break
+    else:
+        pytest.fail("Could not create a profile file in the test directory")
+
+    store = ProfileStore(tmp_path)
+    profile = make_profile(name)
+    store.save(profile)
+
+    assert store.load(name) == profile
+    assert list(tmp_path.iterdir()) == [path]
+
+
 def test_list_names_and_delete(tmp_path):
     store = ProfileStore(tmp_path)
     store.save(make_profile("Alpha"))
