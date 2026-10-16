@@ -16,6 +16,7 @@ from .models import (
 )
 
 DEFAULT_DIR = Path.home() / ".clickcue" / "profiles"
+SCHEMA_VERSION = 1
 
 
 @dataclass
@@ -51,6 +52,7 @@ class Profile:
 
     def to_dict(self) -> dict:
         return {
+            "schema_version": SCHEMA_VERSION,
             "name": self.name,
             "loop_forever": self.loop_forever,
             "repetitions": self.repetitions,
@@ -63,6 +65,13 @@ class Profile:
     def from_dict(cls, data: dict) -> "Profile":
         if not isinstance(data, dict):
             raise ValueError("profile: must be an object")
+        version = data.get("schema_version", 0)
+        validate_integer(version, "schema_version")
+        if version < 0:
+            raise ValueError("schema_version: must be nonnegative")
+        if version > SCHEMA_VERSION:
+            raise ValueError(f"schema_version: unsupported version {version}; "
+                             f"this ClickCue supports up to {SCHEMA_VERSION}")
         target = None
         if data.get("target_window") is not None:
             raw_target = data["target_window"]
@@ -101,6 +110,27 @@ class Profile:
         )
 
 
+def read_profile(path: Path) -> Profile:
+    """Read a validated profile without requiring a local-store filename."""
+    return Profile.from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+
+def write_profile(path: Path, profile: Profile) -> None:
+    """Replace a JSON file only after its complete payload has been written."""
+    payload = json.dumps(profile.to_dict(), ensure_ascii=False, indent=2)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=".clickcue-", suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 class ProfileStore:
     """Reads and writes profiles under a directory, one JSON file per profile."""
 
@@ -124,19 +154,7 @@ class ProfileStore:
         return self._path(name).exists()
 
     def save(self, profile: Profile) -> None:
-        payload = json.dumps(profile.to_dict(), ensure_ascii=False, indent=2)
-        path = self._path(profile.name)
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", dir=path.parent,
-                    prefix=".clickcue-", suffix=".tmp", delete=False) as stream:
-                temporary = Path(stream.name)
-                stream.write(payload)
-            os.replace(temporary, path)
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
+        write_profile(self._path(profile.name), profile)
 
     def load(self, name: str) -> Profile:
         profile = self._read_profile(self._path(name))
@@ -145,7 +163,7 @@ class ProfileStore:
         return profile
 
     def _read_profile(self, path: Path) -> Profile:
-        profile = Profile.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        profile = read_profile(path)
         expected = self._path(profile.name).name
         if path.name != expected:
             raise ValueError(
