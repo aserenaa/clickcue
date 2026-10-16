@@ -178,13 +178,24 @@ def test_blocked_preparation_keeps_ui_responsive_and_discards_cancelled_results(
         release.set()
 
 
-def test_stop_during_preparation_error_dialog_does_not_restart(app, monkeypatch):
+@pytest.fixture
+def tk_root(app):
     try:
         root = tk.Tk()
-    except tk.TclError:
-        pytest.skip("Tk display unavailable")
+    except tk.TclError as exc:
+        pytest.skip(f"Tk unavailable: {exc}")
     root.withdraw()
     app.root = root
+    yield root
+    for timer in root.tk.call("after", "info"):
+        root.after_cancel(timer)
+    if not app._closed:
+        app.dirty = False
+        app._on_close()
+
+
+def test_stop_during_preparation_error_dialog_does_not_restart(app, monkeypatch, tk_root):
+    root = tk_root
     find = Mock(side_effect=[RuntimeError("OS failure"), TargetWindow("Target")])
     monkeypatch.setattr("clickcue.preparation.find_window", find)
     player = Mock()
@@ -206,14 +217,60 @@ def test_stop_during_preparation_error_dialog_does_not_restart(app, monkeypatch)
         root.wait_window(dialog)
 
     monkeypatch.setattr("clickcue.gui.messagebox.showerror", show_error)
+    app._toggle_playback()
+    app._poll_events()
+    root.after(1000, root.quit)
+    root.mainloop()
+    assert len(dialogs) == 1
+    assert find.call_count == 1
+    player.assert_not_called()
+    assert app._preparation is None
+
+
+@pytest.mark.parametrize("accept_close", [False, True])
+def test_dirty_close_cancels_preparation_before_confirmation(
+        app, monkeypatch, tk_root, accept_close):
+    entered = threading.Event()
+    release = threading.Event()
+
+    def find_window(name):
+        entered.set()
+        assert release.wait(2), "test did not release blocked OS call"
+        return TargetWindow(name)
+
+    monkeypatch.setattr("clickcue.preparation.find_window", find_window)
+    player = Mock()
+    monkeypatch.setattr("clickcue.gui.Player", player)
+    closed_during_confirmation = []
+
+    def confirm(*args):
+        dialog = tk.Toplevel(tk_root)
+        dialog.grab_set()
+        tk_root.after(0, release.set)
+        tk_root.after(600, dialog.destroy)
+        tk_root.wait_window(dialog)
+        closed_during_confirmation.append(app._closed)
+        return accept_close
+
+    monkeypatch.setattr("clickcue.gui.messagebox.askyesno", confirm)
     try:
+        app.dirty = True
         app._toggle_playback()
+        assert entered.wait(1)
         app._poll_events()
-        root.after(1000, root.quit)
-        root.mainloop()
-        assert len(dialogs) == 1
-        assert find.call_count == 1
+        app._on_close()  # the real dirty check and confirmation handler
+        assert closed_during_confirmation == [False]
         player.assert_not_called()
-        assert app._preparation is None
+        assert app._closed is accept_close
+        if not accept_close:
+            assert app.dirty
+            assert app._preparation is None
+            app.start_button.configure.assert_called_with(
+                text=f"\u25b6 Start ({app.hotkeys.toggle})", state="normal")
+            app._toggle_playback()
+            tk_root.after(1000, tk_root.quit)
+            tk_root.mainloop()
+            player.assert_called_once()
+            app.player.start.assert_called_once()
     finally:
-        app._on_close()
+        release.set()

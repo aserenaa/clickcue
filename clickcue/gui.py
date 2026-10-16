@@ -914,6 +914,9 @@ class ClickCueApp:
     # ------------------------------------------------------------------ close
 
     def _on_close(self) -> None:
+        # Confirmation runs a nested Tk loop that can deliver worker completion.
+        if self._preparation is not None:
+            self._preparation.windows.cancelled.set()
         if self.dirty and not self._confirm_discard():
             return
         self._closed = True
