@@ -181,8 +181,8 @@ that do not conflict with shortcuts in your target app or operating system.
    capturing — the anchor bounds are refreshed on each capture. For a pause
    without a click, use *Add* and enable *Wait only (no click)*; coordinates
    are ignored. A normal click step still clicks after its delay expires.
-3. Add, edit (double-click), remove, and reorder (▲/▼) steps as needed.
-   *Remove* deletes all selected steps. The arrows move each selected group one
+3. Add, edit (double-click or *Edit*), remove, and reorder (*Move up* / *Move down*) steps as needed.
+   *Remove* deletes all selected steps. The move buttons move each selected group one
    row, preserving order; groups already at that edge stay put while other
    groups can move. Moved steps stay selected and scroll into view.
    Select one or more steps and click *Copy* to duplicate them in order after
@@ -221,6 +221,41 @@ redo; New, opening another profile, and successful imports clear both histories.
 Cancelled or invalid imports preserve history. Settings and target
 window changes are outside this history. Undo/redo marks the profile unsaved,
 even when the sequence returns to its saved content; save again to clear the mark.
+
+### Keyboard access and readability
+
+Use **Tab** / **Shift+Tab** to move between controls and **Space** to activate a
+focused button, checkbox, or radio option. Controls retain the system ttk theme
+and its focus indicators. In the step table, **Up/Down** selects a row.
+**Ctrl+Up/Down** moves the row cursor without clearing the selection;
+**Ctrl+Space** toggles that row and **Ctrl+A** selects all rows (also on macOS).
+Tab to *Edit*, *Copy*, *Remove*, *Move up*,
+or *Move down* and press Space to act on that selection. Table redraws retain a
+keyboard row, including after copying, moving, editing, and undoing. *Add* lets
+you type coordinates without using pointer capture.
+
+Step dialogs start in *Name*. Tab through fields and buttons; **Enter** accepts
+the fields, **Escape** cancels, and Enter on *Cancel* also cancels. The target
+picker starts in the window list: use Up/Down to choose, Enter to accept, or
+Escape to cancel. Long window descriptions can be scrolled horizontally.
+Profile and hotkey dropdowns use native Tk keyboard selection. Native file and
+confirmation dialogs follow the operating system's keyboard conventions.
+
+The main window, step editor, target picker, and preview can be enlarged.
+Minimum sizes use the controls' requested size; table row heights follow the
+theme font at startup. Status and help text wrap with the window, and help text
+uses the theme foreground. Playback state and errors are written as text, not
+only indicated by color. Preview markers have step numbers and an equivalent
+table of names, positions, and delays.
+
+These changes do **not** establish full screen-reader support: Tk/ttk widget
+exposure, label associations, and live status announcements depend on the OS,
+Tk build, and assistive technology. Screen readers, high-contrast modes, actual
+monitor DPI changes, and macOS/Linux desktop keyboard behavior still need
+manual verification. Very large fonts may require a larger display; there is
+no application zoom setting. Isolated real-Tk tests exercise keyboard bindings,
+dialog focus, and font/resize geometry without sending OS input or testing
+native input delivery.
 
 
 ## Profiles
