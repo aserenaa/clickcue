@@ -1,36 +1,67 @@
-# ClickCue
+<h1 align="center">ClickCue</h1>
 
-Coordinate-based click automation with named steps, delays, and reusable
-profiles. Point ClickCue at any application — a game, a form, a repetitive
-workflow — capture the spots you want clicked, name them, set the timing, and
-let it run.
+<p align="center">
+  <strong>Point. Capture. Replay.<br>Turn repetitive clicks into a reusable routine.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/aserenaa/clickcue/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/aserenaa/clickcue/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="Python 3.10 or newer" src="https://img.shields.io/badge/python-%E2%89%A53.10-3776AB?logo=python&amp;logoColor=white">
+  <img alt="Desktop app built with Tkinter" src="https://img.shields.io/badge/desktop-Tkinter-475569">
+  <img alt="Profiles stored locally" src="https://img.shields.io/badge/profiles-local%20only-2E7D32">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+</p>
+
+<p align="center">
+  <a href="#installation">Get started</a> ·
+  <a href="#usage">Usage</a> ·
+  <a href="#platform-support">Platforms</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="SECURITY.md">Security</a> ·
+  <a href="LICENSE">License</a>
+</p>
+
+---
+
+Opening the same menu, choosing the same button, waiting, and doing it again
+gets old quickly. **ClickCue** turns that routine into named steps: capture
+screen positions, choose the timing, and replay the sequence once or on a loop.
+
+Everything stays in a small desktop window. Copy steps instead of capturing
+them again, add pauses without clicks, watch the countdown, and save profiles
+for next time. **F6** starts or stops playback even when another app has focus.
+
+> **A simple routine:** open a menu → choose a view → wait for it to load →
+> refresh. Give each step a name and delay, then save the sequence as a profile.
 
 ## Features
 
-- **Named steps** — every click has a name ("Button 1", "Close menu"), screen
+- 🎯 **Named steps** — every click has a name ("Button 1", "Close menu"), screen
   coordinates, and a delay in seconds before it fires.
-- **Wait-only steps** — pause without moving the pointer or clicking. In the
+- ⏳ **Wait-only steps** — pause without moving the pointer or clicking. In the
   Add/Edit dialog, enable *Wait only (no click)* and enter the delay.
-- **Visual capture** — hover the cursor over the target and press **F8**; the
+- 📍 **Visual capture** — hover the cursor over the target and press **F8**; the
   position is captured without sending a click to the app underneath.
-- **Loop playback** — run a sequence once, N times, or forever. **F6** starts
+- 📋 **Copy multiple steps** — select a range or separate steps and duplicate
+  them together, preserving their order and settings.
+- 🔁 **Loop playback** — run a sequence once, N times, or forever. **F6** starts
   and stops playback globally, even while the target app is in the foreground,
   and interrupts mid-delay. While a step waits, the playback status shows its
   remaining delay in seconds. The list selects and scrolls to the active step.
-- **Window anchoring** — a profile records its target window's position and
+- 🪟 **Window anchoring** — a profile records its target window's position and
   size. If the window has moved or been resized at playback time, ClickCue
   moves it back to the recorded bounds (or scales the coordinates when the
-  window can't be moved), so clicks land exactly where you captured them.
-- **Auto-focus** — before playback, ClickCue brings the target window to the
+  window can't be moved) to keep click positions aligned with the window.
+- 🔎 **Auto-focus** — before playback, ClickCue brings the target window to the
   foreground (via the Accessibility API on macOS, which works even when
   regular app activation is ignored) so the first click isn't swallowed by
   window focusing.
-- **Click guard** — before *every* click, ClickCue verifies that the target
+- 🛡️ **Click guard** — before *every* anchored click, ClickCue checks that the target
   window is actually on top at the click point. If something covers it (a
   notification, another app), it refocuses the target and retries; if the
   target stays covered, playback stops with a message instead of clicking
   into the wrong window.
-- **Profiles** — save sequences under a name ("Game A - farming") and reload
+- 💾 **Local profiles** — save sequences under a name ("Morning workspace") and reload
   them later. Unsaved changes are marked with `*` in the title bar and
   confirmed before being discarded.
 
@@ -59,7 +90,23 @@ Run it with:
 or, without installing, `.venv/bin/pip install pynput` and
 `.venv/bin/python -m clickcue`.
 
-## macOS permissions (required)
+<details>
+<summary><strong>Windows (PowerShell)</strong></summary>
+
+```powershell
+git clone https://github.com/aserenaa/clickcue.git
+cd clickcue
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\clickcue.exe
+```
+
+Python must be version 3.10 or newer. GUI and window behavior on Windows still
+need manual verification; CI runs isolated unit tests.
+
+</details>
+
+### macOS permissions
 
 macOS **silently drops** synthesized clicks and cursor movement unless the app
 running Python has the right permissions — there is no error, clicks simply
@@ -81,6 +128,14 @@ need their own.
 > System Settings → Keyboard.
 
 ## Usage
+
+| Shortcut | Action |
+|---|---|
+| **F8** | Capture the cursor position after arming *Capture* |
+| **F6** | Start or stop playback globally |
+| **Double-click** a step | Edit its name, delay, coordinates, or wait-only mode |
+| **Shift-click** | Select a range of steps |
+| **Command-click** / **Ctrl-click** | Select separate steps on macOS / Windows and Linux |
 
 1. **Choose the target window** (*Target window → Choose…*): pick the app the
    profile will click on. Its current position and size are recorded so the
@@ -106,7 +161,11 @@ need their own.
 
 ## Profiles
 
-Profiles are plain JSON files in `~/.clickcue/profiles/`:
+Profiles are plain JSON files in `~/.clickcue/profiles/`. Save one with
+**Save As…** and choose it from the profile dropdown the next time you need it.
+
+<details>
+<summary><strong>Profile format and window anchoring</strong></summary>
 
 ```json
 {
@@ -133,6 +192,8 @@ Wait-only steps do not check window coverage, and automatic target detection
 uses the first click step. Blocked clicks report the coordinates checked and
 the detected window so misplaced click points can be diagnosed.
 
+</details>
+
 ## Platform support
 
 Window anchoring and the click guard are best-effort safeguards, not a security
@@ -152,7 +213,13 @@ scaling math. Window anchoring compensates for a moved or resized target
 window; moving another app's window uses the Accessibility API on macOS and
 `MoveWindow` on Windows.
 
-## Development
+## Contributing
+
+Bug reports, fixes, and documentation improvements are welcome. Read the
+[contribution guide](CONTRIBUTING.md) for setup, testing, and pull requests.
+Please use synthetic profiles and remove private information from screenshots.
+
+### Development checks
 
 ```bash
 .venv/bin/pip install -e ".[dev]"
@@ -171,7 +238,7 @@ Tests use a dummy input backend and mocked mouse controllers so they cannot
 send real clicks. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development
 workflow and [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 
-## Privacy
+## Privacy & security
 
 ClickCue has no telemetry, network client, or automatic updates. Profiles stay
 on your computer in `~/.clickcue/profiles/` as plain JSON. They contain step
@@ -180,6 +247,10 @@ on Windows) and bounds. Window titles and step names can reveal private
 information. Review and sanitize profiles and screenshots before sharing them.
 The global keyboard listener handles F6 and F8; ClickCue does not save typed
 text. Installation and dependency/security checks contact package services.
+
+Report vulnerabilities through [GitHub's private reporting form](https://github.com/aserenaa/clickcue/security/advisories/new),
+not a public issue. See [SECURITY.md](SECURITY.md) for stored data, permissions,
+automation limits, and the reporting policy.
 
 ## Before publishing
 
@@ -195,4 +266,5 @@ games.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © Abraham Serena. Dependencies retain their own licenses;
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
