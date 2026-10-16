@@ -1,7 +1,9 @@
 """Profile persistence as JSON files."""
 
 import json
+import os
 import re
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -71,7 +73,18 @@ class ProfileStore:
 
     def save(self, profile: Profile) -> None:
         payload = json.dumps(profile.to_dict(), ensure_ascii=False, indent=2)
-        self._path(profile.name).write_text(payload, encoding="utf-8")
+        path = self._path(profile.name)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=path.parent,
+                    prefix=".clickcue-", suffix=".tmp", delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(payload)
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def load(self, name: str) -> Profile:
         data = json.loads(self._path(name).read_text(encoding="utf-8"))

@@ -168,6 +168,9 @@ need their own.
 
 Profiles are plain JSON files in `~/.clickcue/profiles/`. Save one with
 **Save As…** and choose it from the profile dropdown the next time you need it.
+Saves replace the profile file only after the new data has been written. If a
+save or delete fails, ClickCue shows an error and keeps your current sequence;
+failed saves leave your edits marked as unsaved so you can retry.
 
 <details>
 <summary><strong>Profile format and window anchoring</strong></summary>
